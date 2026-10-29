@@ -274,6 +274,112 @@ async function updateApplicationStatus(req, res) {
 }
 
 /**
+ * @controller  updateVolunteerSuggestion
+ * @route       PATCH /admin/applications/:id/volunteer-suggestion
+ * @desc        Update volunteer suggestion note for a student
+ */
+async function updateVolunteerSuggestion(req, res) {
+  try {
+    const { id } = req.params;
+    const { suggestion, volunteer_name } = req.body;
+
+    const updatePayload = {
+      volunteer_suggestion: suggestion || "",
+      volunteer_name: volunteer_name || null,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data, error } = await supabaseAdmin
+      .from("applications")
+      .update(updatePayload)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update volunteer suggestion",
+        error: error.message,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Volunteer suggestion saved successfully",
+      data,
+    });
+  } catch (err) {
+    console.error("updateVolunteerSuggestion error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error saving volunteer suggestion",
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * @controller  bulkUpdateVolunteerSuggestions
+ * @route       POST /admin/applications/bulk-volunteer-suggestions
+ * @desc        Bulk sync volunteer suggestions from Google Sheets / Excel
+ */
+async function bulkUpdateVolunteerSuggestions(req, res) {
+  try {
+    const { suggestions } = req.body; // Array of { id or application_number, suggestion, volunteer_name }
+
+    if (!Array.isArray(suggestions) || suggestions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No suggestions provided for sync",
+      });
+    }
+
+    let updatedCount = 0;
+    const errors = [];
+
+    for (const item of suggestions) {
+      if (!item.suggestion && item.suggestion !== "") continue;
+
+      let query = supabaseAdmin.from("applications").update({
+        volunteer_suggestion: item.suggestion,
+        volunteer_name: item.volunteer_name || null,
+        updated_at: new Date().toISOString(),
+      });
+
+      if (item.id) {
+        query = query.eq("id", item.id);
+      } else if (item.application_number) {
+        query = query.eq("application_number", item.application_number);
+      } else {
+        continue;
+      }
+
+      const { error } = await query;
+      if (error) {
+        errors.push({ item, error: error.message });
+      } else {
+        updatedCount++;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Successfully synchronized ${updatedCount} volunteer suggestions`,
+      updatedCount,
+      errors: errors.length > 0 ? errors : undefined,
+    });
+  } catch (err) {
+    console.error("bulkUpdateVolunteerSuggestions error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error syncing volunteer suggestions",
+      error: err.message,
+    });
+  }
+}
+
+/**
  * @controller  deleteApplication
  * @route       DELETE /admin/applications/:id
  * @desc        Delete an application record
@@ -314,5 +420,7 @@ module.exports = {
   getAllApplications,
   getApplicationById,
   updateApplicationStatus,
+  updateVolunteerSuggestion,
+  bulkUpdateVolunteerSuggestions,
   deleteApplication,
 };

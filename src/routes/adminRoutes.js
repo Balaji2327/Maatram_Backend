@@ -9,6 +9,8 @@ router.post("/login", adminController.adminLogin);
 router.get("/applications", adminController.getAllApplications);
 router.get("/applications/:id", adminController.getApplicationById);
 router.patch("/applications/:id/status", adminController.updateApplicationStatus);
+router.patch("/applications/:id/volunteer-suggestion", adminController.updateVolunteerSuggestion);
+router.post("/applications/bulk-volunteer-suggestions", adminController.bulkUpdateVolunteerSuggestions);
 router.delete("/applications/:id", adminController.deleteApplication);
 
 module.exports = router;
