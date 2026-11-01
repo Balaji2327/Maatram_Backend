@@ -382,6 +382,212 @@ async function verifyOtp(req, res) {
 }
 
 /**
+ * @controller  signup
+ * @route       POST /auth/signup
+ * @desc        Register a student with email, mobile, and password (No OTP required)
+ */
+async function signup(req, res) {
+  try {
+    const { fullName, email, mobileNumber, password, confirmPassword } = req.body;
+
+    if (!fullName || !fullName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Full name is required",
+      });
+    }
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address is required",
+      });
+    }
+
+    if (!mobileNumber || !mobileNumber.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Mobile number is required",
+      });
+    }
+
+    if (!password || password.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters",
+      });
+    }
+
+    if (password !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Password and confirm password do not match",
+      });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPhone = formatPhoneNumber(mobileNumber.trim());
+
+    // 1. Create student in Supabase Auth (auth.users) with pre-confirmed email
+    const { data: createdUser, error: createError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email: cleanEmail,
+        password: password,
+        email_confirm: true,
+        phone_confirm: true,
+        user_metadata: {
+          full_name: fullName.trim(),
+          phone: cleanPhone,
+          mobile_number: mobileNumber.trim(),
+          role: "applicant",
+        },
+      });
+
+    if (createError) {
+      // Check if user already exists
+      if (
+        createError.message?.toLowerCase().includes("already registered") ||
+        createError.message?.toLowerCase().includes("unique constraint") ||
+        createError.status === 422
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "An account with this email address already exists. Please sign in.",
+        });
+      }
+
+      console.error("Supabase createUser error:", createError);
+      return res.status(400).json({
+        success: false,
+        message: createError.message || "Failed to register student account",
+      });
+    }
+
+    const userId = createdUser?.user?.id;
+
+    // 2. Automatically create initial draft application in applications table
+    if (userId) {
+      try {
+        const { data: existingApp } = await supabaseAdmin
+          .from("applications")
+          .select("id")
+          .eq("user_id", userId)
+          .maybeSingle();
+
+        if (!existingApp) {
+          const appNum = await generateNextApplicationNumber();
+          await supabaseAdmin.from("applications").insert({
+            user_id: userId,
+            application_number: appNum,
+            full_name: fullName.trim(),
+            mobile_number: mobileNumber.trim(),
+            email: cleanEmail,
+            status: "draft",
+          });
+        }
+      } catch (appErr) {
+        console.warn("Could not pre-create application draft on signup:", appErr.message);
+      }
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Account created successfully! Please sign in with your credentials.",
+      user: createdUser?.user,
+    });
+  } catch (err) {
+    console.error("signup controller error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error during registration",
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * @controller  login
+ * @route       POST /auth/login
+ * @desc        Authenticate student using Email and Password (No OTP required)
+ */
+async function login(req, res) {
+  try {
+    const { identifier, email, password } = req.body;
+    const inputEmail = (email || identifier || "").trim().toLowerCase();
+
+    if (!inputEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address is required to sign in",
+      });
+    }
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password is required to sign in",
+      });
+    }
+
+    // Authenticate with Supabase password auth
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: inputEmail,
+      password: password,
+    });
+
+    if (error) {
+      console.warn("Supabase signInWithPassword failed:", error.message);
+      return res.status(400).json({
+        success: false,
+        message: "Invalid email or password. Please verify and try again.",
+        error: error.message,
+      });
+    }
+
+    const { session, user } = data;
+
+    // Ensure draft application exists
+    if (user) {
+      try {
+        const { data: existingApp } = await supabaseAdmin
+          .from("applications")
+          .select("id")
+          .eq("user_id", user.id)
+          .maybeSingle();
+
+        if (!existingApp) {
+          const appNum = await generateNextApplicationNumber();
+          await supabaseAdmin.from("applications").insert({
+            user_id: user.id,
+            application_number: appNum,
+            full_name: user.user_metadata?.full_name || "Student Applicant",
+            mobile_number: user.user_metadata?.phone || user.phone,
+            email: user.email,
+            status: "draft",
+          });
+        }
+      } catch (appErr) {
+        console.warn("Could not verify application draft on login:", appErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Login successful!",
+      session,
+      user,
+    });
+  } catch (err) {
+    console.error("login controller error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error during authentication",
+      error: err.message,
+    });
+  }
+}
+
+/**
  * @controller  getMe
  * @route       GET /api/auth/me
  * @desc        Get authenticated student profile from Supabase auth.users
@@ -394,6 +600,8 @@ async function getMe(req, res) {
 }
 
 module.exports = {
+  signup,
+  login,
   sendOtp,
   verifyOtp,
   getMe,

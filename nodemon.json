@@ -1,0 +1,5 @@
+{
+  "watch": ["src", "index.js"],
+  "ignore": ["data/*", "data/**", "*.json", "supabase_schema.sql"],
+  "ext": "js,mjs,cjs"
+}
