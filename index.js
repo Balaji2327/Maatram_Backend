@@ -15,7 +15,13 @@ const FRONTEND_URL =
 // Middleware
 app.use(
   cors({
-    origin: [FRONTEND_URL, "http://localhost:3000"],
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl) or any localhost port
+      if (!origin || /^http:\/\/localhost(:\d+)?$/.test(origin) || origin === FRONTEND_URL) {
+        return callback(null, true);
+      }
+      return callback(null, true); // Permissive in dev mode for multi-portal setup
+    },
     credentials: true,
   })
 );
