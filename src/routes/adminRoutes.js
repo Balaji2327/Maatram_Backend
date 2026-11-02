@@ -25,6 +25,10 @@ router.patch("/applications/:id/volunteer-suggestion", adminController.updateVol
 router.post("/applications/bulk-volunteer-suggestions", adminController.bulkUpdateVolunteerSuggestions);
 router.delete("/applications/:id", adminController.deleteApplication);
 
+// Students & Alumni Directory (Supports Admin & Student/Alumni views)
+router.get("/students", adminController.getAllStudents);
+router.get("/alumni", adminController.getAllAlumni);
+
 // Posts Management
 router.get("/posts", adminController.getAllPosts);
 router.post("/posts", authenticateAdminToken, adminController.createPost);
