@@ -459,8 +459,20 @@ async function getAllApplications(req, res) {
   try {
     const { status, search, district } = req.query;
 
-    const applications = await ApplicationModel.getAll({ status, district });
-    let filtered = (applications || []).map((app) => {
+    const rawApplications = await ApplicationModel.getAll({ status, district });
+
+    // Only include incoming new applicants; exclude already enrolled students and alumni
+    const applications = (rawApplications || []).filter((app) => {
+      const isExistingStudentOrAlumni =
+        app.current_stage === "admitted" ||
+        app.application_number?.startsWith("MF-SCH-") ||
+        app.application_number?.startsWith("MF-ALUM-") ||
+        app.email?.includes("@student.") ||
+        app.email?.includes("@alumni.");
+      return !isExistingStudentOrAlumni;
+    });
+
+    let filtered = applications.map((app) => {
       let ext = {};
       if (app.additional_remarks) {
         try {
