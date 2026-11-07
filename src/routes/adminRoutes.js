@@ -27,6 +27,8 @@ router.delete("/applications/:id", adminController.deleteApplication);
 
 // Students & Alumni Directory (Supports Admin & Student/Alumni views)
 router.get("/students", adminController.getAllStudents);
+router.get("/students/:email/academics", adminController.getStudentAcademicRecords);
+router.post("/students/:email/academics", adminController.saveStudentAcademicRecords);
 router.get("/alumni", adminController.getAllAlumni);
 
 // Posts Management
@@ -40,6 +42,14 @@ router.get("/events", adminController.getAllEvents);
 router.post("/events", authenticateAdminToken, adminController.createEvent);
 router.put("/events/:id", authenticateAdminToken, adminController.updateEvent);
 router.delete("/events/:id", authenticateAdminToken, adminController.deleteEvent);
+router.post("/events/:id/respond", adminController.respondToEvent);
+router.post("/events/:id/approve-assignment", authenticateAdminToken, adminController.approveVolunteerAssignment);
+router.get("/events/:id/assignments", adminController.getEventAssignments);
+
+// Volunteer Registration & Status
+router.post("/volunteers/register", adminController.registerVolunteer);
+router.get("/volunteers/list", adminController.getRegisteredVolunteers);
+router.get("/volunteers/status/:email", adminController.checkVolunteerStatus);
 
 // Media Streaming Proxy (Streams S3 assets directly to browsers)
 router.get("/media/{*key}", adminController.streamMedia);

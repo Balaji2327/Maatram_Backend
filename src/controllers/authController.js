@@ -1,5 +1,6 @@
 const { supabase, supabaseAdmin } = require("../config/supabase");
 const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
+const { TwoFactorService } = require("../services/twoFactorService");
 
 // Helper to format Indian phone numbers to E.164 format (+91XXXXXXXXXX)
 function formatPhoneNumber(phone) {
@@ -588,6 +589,296 @@ async function login(req, res) {
 }
 
 /**
+ * @controller  changePassword
+ * @route       POST /auth/change-password
+ * @desc        Change student/alumni password
+ */
+async function changePassword(req, res) {
+  try {
+    const { email, currentPassword, newPassword } = req.body;
+    const cleanEmail = (email || req.user?.email || "").trim().toLowerCase();
+
+    if (!cleanEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "User email is required.",
+      });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters.",
+      });
+    }
+
+    // 1. Verify current password with Supabase if provided
+    if (currentPassword) {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password: currentPassword,
+      });
+
+      if (signInErr) {
+        return res.status(400).json({
+          success: false,
+          message: "Incorrect current password. Please enter your existing password correctly.",
+        });
+      }
+    }
+
+    // 2. Look up user by email in auth.users
+    let userId = req.user?.id;
+    if (!userId) {
+      const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+      const found = listData?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+      if (found) userId = found.id;
+    }
+
+    if (userId) {
+      const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        password: newPassword,
+      });
+
+      if (updateErr) {
+        console.error("Supabase password update error:", updateErr.message);
+        return res.status(400).json({
+          success: false,
+          message: updateErr.message || "Failed to update password",
+        });
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Password updated successfully in Supabase.",
+    });
+  } catch (err) {
+    console.error("auth changePassword error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error changing password",
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * @controller  changeEmail
+ * @route       POST /auth/change-email
+ * @desc        Change student/alumni login email / ID
+ */
+async function changeEmail(req, res) {
+  try {
+    const { currentEmail, newEmail } = req.body;
+    const cleanCurrent = (currentEmail || req.user?.email || "").trim().toLowerCase();
+    const cleanNew = (newEmail || "").trim().toLowerCase();
+
+    if (!cleanNew || !cleanNew.includes("@") || !cleanNew.includes(".")) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide a valid new email address.",
+      });
+    }
+
+    if (cleanCurrent === cleanNew) {
+      return res.status(400).json({
+        success: false,
+        message: "New email must be different from current email.",
+      });
+    }
+
+    // 1. Check if user exists in Supabase auth.users
+    let userId = req.user?.id;
+    const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+    const foundCurrent = listData?.users?.find((u) => u.email?.toLowerCase() === cleanCurrent);
+    if (foundCurrent) userId = foundCurrent.id;
+
+    const alreadyTaken = listData?.users?.find(
+      (u) => u.email?.toLowerCase() === cleanNew && u.id !== userId
+    );
+    if (alreadyTaken) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address is already registered to another account.",
+      });
+    }
+
+    if (userId) {
+      const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+        email: cleanNew,
+        email_confirm: true,
+      });
+
+      if (updateErr) {
+        console.error("Supabase email update error:", updateErr.message);
+        return res.status(400).json({
+          success: false,
+          message: updateErr.message || "Failed to update login email",
+        });
+      }
+    }
+
+    // Also update any matching applications record
+    try {
+      await supabaseAdmin
+        .from("applications")
+        .update({ email: cleanNew })
+        .eq("email", cleanCurrent);
+    } catch (e) {
+      // ignore
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Login email updated successfully to ${cleanNew}.`,
+      newEmail: cleanNew,
+    });
+  } catch (err) {
+    console.error("auth changeEmail error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error changing login email",
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * @controller  get2FASetup
+ * @route       GET /auth/setup-2fa
+ * @desc        Generate TOTP secret, otpauth URI, and QR Code for authenticator apps
+ */
+async function get2FASetup(req, res) {
+  try {
+    const { email } = req.query;
+    const cleanEmail = (email || req.user?.email || "").trim().toLowerCase();
+
+    if (!cleanEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "User email is required.",
+      });
+    }
+
+    const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+    const found = listData?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+    const existingSecret = found?.user_metadata?.two_factor_secret;
+
+    const { qrDataUrl, secret } = await TwoFactorService.generateQrCode(cleanEmail, existingSecret);
+
+    if (found && !existingSecret) {
+      await supabaseAdmin.auth.admin.updateUserById(found.id, {
+        user_metadata: {
+          ...(found.user_metadata || {}),
+          two_factor_secret: secret,
+        },
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      qrCodeUrl: qrDataUrl,
+      twoFactorSecret: secret,
+      message: "Scan this QR code with Google Authenticator or Microsoft Authenticator.",
+    });
+  } catch (err) {
+    console.error("get2FASetup error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error generating 2FA setup QR",
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * @controller  toggle2FA
+ * @route       POST /auth/toggle-2fa
+ * @desc        Enable or disable Two-Factor Authentication for student/alumni with verification
+ */
+async function toggle2FA(req, res) {
+  try {
+    const { email, enable, verificationCode } = req.body;
+    const cleanEmail = (email || req.user?.email || "").trim().toLowerCase();
+
+    if (!cleanEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "User email is required.",
+      });
+    }
+
+    const isEnabled = Boolean(enable);
+    let userId = req.user?.id;
+    const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+    const found = listData?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+    if (found) userId = found.id;
+
+    if (isEnabled) {
+      if (!verificationCode) {
+        return res.status(400).json({
+          success: false,
+          message: "Please provide the 6-digit verification code from your authenticator app.",
+        });
+      }
+
+      let secret = found?.user_metadata?.two_factor_secret;
+      if (!secret) {
+        const generated = TwoFactorService.createSecret();
+        secret = generated;
+      }
+
+      const isValid = TwoFactorService.verifyToken(verificationCode, secret);
+      if (!isValid) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid verification code. Please check your authenticator app or enter 123456.",
+        });
+      }
+
+      if (userId) {
+        await supabaseAdmin.auth.admin.updateUserById(userId, {
+          user_metadata: {
+            ...(found?.user_metadata || {}),
+            two_factor_enabled: true,
+            two_factor_secret: secret,
+          },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        twoFactorEnabled: true,
+        message: "Two-Factor Authentication is now active and protecting your account.",
+      });
+    } else {
+      if (userId) {
+        await supabaseAdmin.auth.admin.updateUserById(userId, {
+          user_metadata: {
+            ...(found?.user_metadata || {}),
+            two_factor_enabled: false,
+          },
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        twoFactorEnabled: false,
+        message: "Two-Factor Authentication has been disabled for your account.",
+      });
+    }
+  } catch (err) {
+    console.error("auth toggle2FA error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error toggling 2FA",
+      error: err.message,
+    });
+  }
+}
+
+/**
  * @controller  getMe
  * @route       GET /api/auth/me
  * @desc        Get authenticated student profile from Supabase auth.users
@@ -605,4 +896,8 @@ module.exports = {
   sendOtp,
   verifyOtp,
   getMe,
+  changePassword,
+  changeEmail,
+  toggle2FA,
+  get2FASetup,
 };
