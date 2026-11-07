@@ -46,6 +46,8 @@ async function getAllStudents(req, res) {
         status: app.status || "selected",
         current_stage: app.current_stage || "admitted",
         created_at: u.created_at,
+        academic_records: meta.academic_records || [],
+        academic_updated_at: meta.updated_academic_at || null,
         metadata: meta,
       };
     });
