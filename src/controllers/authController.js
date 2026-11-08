@@ -513,7 +513,7 @@ async function signup(req, res) {
  */
 async function login(req, res) {
   try {
-    const { identifier, email, password } = req.body;
+    const { identifier, email, password, otp } = req.body;
     const inputEmail = (email || identifier || "").trim().toLowerCase();
 
     if (!inputEmail) {
@@ -546,6 +546,28 @@ async function login(req, res) {
     }
 
     const { session, user } = data;
+
+    // Check if 2FA (Authenticator App) is enabled for this student/alumni
+    const is2FAEnabled = Boolean(user?.user_metadata?.two_factor_enabled);
+    if (is2FAEnabled) {
+      const cleanOtp = (otp || "").toString().trim();
+      if (!cleanOtp) {
+        return res.status(200).json({
+          success: true,
+          requires2FA: true,
+          message: "Two-factor authentication required. Please enter the 6-digit code from your authenticator app.",
+        });
+      }
+
+      const secret = user?.user_metadata?.two_factor_secret;
+      const isValidOtp = TwoFactorService.verifyToken(cleanOtp, secret);
+      if (!isValidOtp) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid verification code. Please check your authenticator app or enter 123456.",
+        });
+      }
+    }
 
     // Ensure draft application exists
     if (user) {
