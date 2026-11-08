@@ -776,8 +776,11 @@ async function get2FASetup(req, res) {
       });
     }
 
+    const isTwoFactorActive = Boolean(found?.user_metadata?.two_factor_enabled);
+
     return res.status(200).json({
       success: true,
+      twoFactorEnabled: isTwoFactorActive,
       qrCodeUrl: qrDataUrl,
       twoFactorSecret: secret,
       message: "Scan this QR code with Google Authenticator or Microsoft Authenticator.",
