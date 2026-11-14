@@ -125,8 +125,27 @@ async function getAdminProfile(req, res) {
     const resolvedAdmin = dbAdmin || admin;
 
     let totpSetup = null;
+    let qrCodeUrl = "";
+    let twoFactorSecret = resolvedAdmin.two_factor_secret || "";
+
     if (!resolvedAdmin.two_factor_enabled) {
-      totpSetup = TwoFactorService.generateSecret(resolvedAdmin.email);
+      const qrRes = await TwoFactorService.generateQrCode(
+        resolvedAdmin.email,
+        resolvedAdmin.two_factor_secret
+      );
+      twoFactorSecret = qrRes.secret;
+      qrCodeUrl = qrRes.qrDataUrl;
+      totpSetup = {
+        secret: qrRes.secret,
+        uri: qrRes.uri,
+        qrCodeUrl: qrRes.qrDataUrl,
+      };
+
+      if (!resolvedAdmin.two_factor_secret && resolvedAdmin.id) {
+        await AdminService.updateAdmin(resolvedAdmin.id, {
+          two_factor_secret: qrRes.secret,
+        });
+      }
     }
 
     return res.status(200).json({
@@ -137,6 +156,8 @@ async function getAdminProfile(req, res) {
         email: resolvedAdmin.email,
         role: resolvedAdmin.role,
         twoFactorEnabled: !!resolvedAdmin.two_factor_enabled,
+        twoFactorSecret,
+        qrCodeUrl,
         createdAt: resolvedAdmin.created_at,
         totpSetup,
       },

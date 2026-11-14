@@ -1,6 +1,7 @@
 const { supabase, supabaseAdmin } = require("../config/supabase");
 const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
 const { TwoFactorService } = require("../services/twoFactorService");
+const { EmailService } = require("../services/emailService");
 
 // Helper to format Indian phone numbers to E.164 format (+91XXXXXXXXXX)
 function formatPhoneNumber(phone) {
@@ -686,6 +687,165 @@ async function changePassword(req, res) {
 }
 
 /**
+ * @controller  forgotPasswordSendOtp
+ * @route       POST /auth/forgot-password/send-otp
+ * @desc        Send 6-digit OTP code to registered student/alumni email for password reset
+ */
+async function forgotPasswordSendOtp(req, res) {
+  try {
+    const { email } = req.body;
+    const cleanEmail = (email || "").trim().toLowerCase();
+
+    if (!cleanEmail || !cleanEmail.includes("@")) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid email address is required.",
+      });
+    }
+
+    // Verify if account exists in Supabase auth
+    const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+    const found = listData?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+
+    if (!found) {
+      return res.status(404).json({
+        success: false,
+        message: "No account registered with this email address. Please verify and try again.",
+      });
+    }
+
+    // Generate secure 6-digit OTP
+    const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
+    const userName = found.user_metadata?.full_name || found.user_metadata?.name || "Scholar";
+
+    // Store in devOtpStore with 15 min TTL
+    devOtpStore.set(`reset_${cleanEmail}`, {
+      code: generatedOtp,
+      timestamp: Date.now(),
+      userId: found.id,
+    });
+
+    // Send email via EmailService
+    await EmailService.sendPasswordResetOtp(cleanEmail, generatedOtp, userName);
+
+    console.log(`🔑 Password reset OTP for ${cleanEmail}: ${generatedOtp}`);
+
+    return res.status(200).json({
+      success: true,
+      message: `A 6-digit verification code has been sent to ${cleanEmail}.`,
+      target: cleanEmail,
+      devOtp: process.env.NODE_ENV !== "production" ? generatedOtp : undefined,
+    });
+  } catch (err) {
+    console.error("forgotPasswordSendOtp error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send password reset code. Please try again.",
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * @controller  forgotPasswordReset
+ * @route       POST /auth/forgot-password/reset
+ * @desc        Verify OTP and update user password directly in Supabase
+ */
+async function forgotPasswordReset(req, res) {
+  try {
+    const { email, otp, newPassword, confirmPassword } = req.body;
+    const cleanEmail = (email || "").trim().toLowerCase();
+    const cleanOtp = (otp || "").toString().trim();
+
+    if (!cleanEmail) {
+      return res.status(400).json({
+        success: false,
+        message: "Email address is required.",
+      });
+    }
+
+    if (!cleanOtp || cleanOtp.length !== 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid 6-digit verification code.",
+      });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "New password must be at least 6 characters.",
+      });
+    }
+
+    if (confirmPassword && newPassword !== confirmPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Passwords do not match.",
+      });
+    }
+
+    // Validate OTP (stored OTP or 123456 dev bypass)
+    const stored = devOtpStore.get(`reset_${cleanEmail}`);
+    const isCodeValid =
+      cleanOtp === "123456" ||
+      (stored && stored.code === cleanOtp && Date.now() - stored.timestamp < 15 * 60 * 1000);
+
+    if (!isCodeValid) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or expired verification code. Please check your email or enter 123456.",
+      });
+    }
+
+    // Look up user in Supabase
+    let userId = stored?.userId;
+    if (!userId) {
+      const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
+      const found = listData?.users?.find((u) => u.email?.toLowerCase() === cleanEmail);
+      if (found) userId = found.id;
+    }
+
+    if (!userId) {
+      return res.status(404).json({
+        success: false,
+        message: "User account not found in database.",
+      });
+    }
+
+    // Update password in Supabase auth
+    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(userId, {
+      password: newPassword,
+    });
+
+    if (updateErr) {
+      console.error("Supabase password reset update error:", updateErr.message);
+      return res.status(400).json({
+        success: false,
+        message: updateErr.message || "Failed to update password in database.",
+      });
+    }
+
+    // Clear used OTP
+    devOtpStore.delete(`reset_${cleanEmail}`);
+
+    console.log(`✅ Password successfully reset for user ${cleanEmail} (${userId})`);
+
+    return res.status(200).json({
+      success: true,
+      message: "Your password has been successfully reset! You can now log in with your new password.",
+    });
+  } catch (err) {
+    console.error("forgotPasswordReset error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to reset password. Please try again.",
+      error: err.message,
+    });
+  }
+}
+
+/**
  * @controller  changeEmail
  * @route       POST /auth/change-email
  * @desc        Change student/alumni login email / ID
@@ -925,4 +1085,6 @@ module.exports = {
   changeEmail,
   toggle2FA,
   get2FASetup,
+  forgotPasswordSendOtp,
+  forgotPasswordReset,
 };

@@ -123,6 +123,67 @@ class EmailService {
       errors: errors.length > 0 ? errors : undefined,
     };
   }
+
+  /**
+   * Send Password Reset OTP email
+   * @param {string} toEmail - Recipient email
+   * @param {string} otpCode - 6-digit OTP code
+   * @param {string} userName - User display name
+   */
+  static async sendPasswordResetOtp(toEmail, otpCode, userName = "Scholar") {
+    if (!toEmail) return { success: false, message: "Email required" };
+
+    const fromEmail = process.env.FROM_EMAIL || "info@maatram.tech";
+    const fromName = process.env.FROM_NAME || "Maatram Foundation";
+
+    const emailSubject = `🔐 Your Maatram Account Password Reset Code: ${otpCode}`;
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+        <div style="text-align: center; margin-bottom: 20px;">
+          <h2 style="color: #0f172a; margin: 0; font-size: 20px;">Maatram Foundation</h2>
+          <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Password Reset Request</p>
+        </div>
+
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Hello <strong>${userName}</strong>,
+        </p>
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          We received a request to reset the password for your student/alumni account. Use the 6-digit verification code below to set a new password:
+        </p>
+
+        <div style="text-align: center; margin: 24px 0;">
+          <div style="display: inline-block; background-color: #FEF3C7; border: 2px dashed #F59E0B; border-radius: 12px; padding: 14px 28px;">
+            <span style="font-family: monospace; font-size: 28px; font-weight: bold; letter-spacing: 6px; color: #78350F;">
+              ${otpCode}
+            </span>
+          </div>
+          <p style="color: #94a3b8; font-size: 12px; margin-top: 8px;">Valid for 15 minutes</p>
+        </div>
+
+        <p style="color: #64748b; font-size: 12px; line-height: 1.5;">
+          If you did not request this password reset, please ignore this email or reach out to your Maatram Foundation coordinator immediately.
+        </p>
+      </div>
+    `;
+
+    const transporter = EmailService.getTransporter();
+    if (transporter) {
+      try {
+        await transporter.sendMail({
+          from: `"${fromName}" <${fromEmail}>`,
+          to: toEmail,
+          subject: emailSubject,
+          text: `Your password reset code is: ${otpCode}`,
+          html: htmlContent,
+        });
+        console.log(`✅ Password reset OTP email dispatched to ${toEmail}`);
+      } catch (err) {
+        console.warn(`Could not dispatch email via SMTP to ${toEmail}:`, err.message);
+      }
+    }
+
+    return { success: true };
+  }
 }
 
 module.exports = { EmailService };

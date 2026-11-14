@@ -10,6 +10,23 @@ class TwoFactorService {
   }
 
   /**
+   * Helper alias for generateSecret/createSecret with URI metadata
+   */
+  static generateSecret(email) {
+    const secret = this.createSecret();
+    const uri = generateURI({
+      strategy: "totp",
+      label: email || "admin@maatram.com",
+      issuer: "Maatram Foundation",
+      secret,
+    });
+    return {
+      secret,
+      uri,
+    };
+  }
+
+  /**
    * Generate otpauth URI and QR Code data URL for authenticator apps (Google Authenticator, Microsoft Authenticator)
    */
   static async generateQrCode(email, secret) {
