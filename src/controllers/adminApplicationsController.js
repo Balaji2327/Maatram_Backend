@@ -1,5 +1,6 @@
 const { ApplicationModel } = require("../models/Application");
 const { StorageService } = require("../services/storageService");
+const { EmailService } = require("../services/emailService");
 
 /**
  * @controller  getAllApplications
@@ -12,7 +13,10 @@ async function getAllApplications(req, res) {
 
     const rawApplications = await ApplicationModel.getAll({ status, district });
 
-    // Only include incoming new applicants; exclude already enrolled students and alumni
+    // Only include incoming new applicants who have actually filled/submitted their application form.
+    // Exclude:
+    // 1. Enrolled students / alumni
+    // 2. Fresh signups who only have an empty registration placeholder (status is draft without submitted form details)
     const applications = (rawApplications || []).filter((app) => {
       const isExistingStudentOrAlumni =
         app.current_stage === "admitted" ||
@@ -20,21 +24,58 @@ async function getAllApplications(req, res) {
         app.application_number?.startsWith("MF-ALUM-") ||
         app.email?.includes("@student.") ||
         app.email?.includes("@alumni.");
-      return !isExistingStudentOrAlumni;
+      if (isExistingStudentOrAlumni) return false;
+
+      // If status is submitted, under_review, shortlisted, selected, etc., they definitely filled it
+      if (app.status && app.status !== "draft") return true;
+
+      // If status is "draft", only show if the student actually started filling the form
+      // (e.g. entered school, marks, degree, parent name, district, or address)
+      const hasFilledDetails = Boolean(
+        app.twelfth_school_name ||
+        app.tenth_school_name ||
+        app.father_name ||
+        app.mother_name ||
+        app.preferred_degree ||
+        app.twelfth_cutoff ||
+        app.annual_income ||
+        app.family_annual_income ||
+        (app.district && app.district.trim() !== "") ||
+        (app.address && app.address.trim() !== "")
+      );
+
+      return hasFilledDetails;
     });
 
     let filtered = applications.map((app) => {
       let ext = {};
       if (app.additional_remarks) {
-        try {
-          if (app.additional_remarks.startsWith("{")) {
-            ext = JSON.parse(app.additional_remarks);
-          }
-        } catch {}
+        if (typeof app.additional_remarks === "object" && app.additional_remarks !== null) {
+          ext = { ...app.additional_remarks };
+        } else if (typeof app.additional_remarks === "string") {
+          try {
+            ext = JSON.parse(app.additional_remarks.trim());
+          } catch {}
+        }
       }
       return {
         ...app,
         ...ext,
+        volunteer_suggestion: ext.volunteer_suggestion || app.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
+        volunteer_name: ext.volunteer_name || app.volunteer_name || ext.tele_volunteer_name || "",
+        tele_volunteer_name: ext.tele_volunteer_name || ext.volunteer_name || app.volunteer_name || "",
+        tele_volunteer_email: ext.tele_volunteer_email || "",
+        tele_volunteer_phone: ext.tele_volunteer_phone || "",
+        tele_volunteer_role: ext.tele_volunteer_role || "",
+        tele_volunteer_affiliation: ext.tele_volunteer_affiliation || "",
+        tele_volunteer_suggestion: ext.tele_volunteer_suggestion || ext.volunteer_suggestion || app.volunteer_suggestion || "",
+        physical_volunteer_name: ext.physical_volunteer_name || "",
+        physical_volunteer_email: ext.physical_volunteer_email || "",
+        physical_volunteer_phone: ext.physical_volunteer_phone || "",
+        physical_volunteer_role: ext.physical_volunteer_role || "",
+        physical_volunteer_affiliation: ext.physical_volunteer_affiliation || "",
+        physical_volunteer_suggestion: ext.physical_volunteer_suggestion || "",
+        physical_verification_notes: ext.physical_verification_notes || "",
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(app.document_10th_marksheet || ""),
@@ -116,11 +157,13 @@ async function getApplicationById(req, res) {
 
     let ext = {};
     if (application.additional_remarks) {
-      try {
-        if (application.additional_remarks.startsWith("{")) {
-          ext = JSON.parse(application.additional_remarks);
-        }
-      } catch {}
+      if (typeof application.additional_remarks === "object" && application.additional_remarks !== null) {
+        ext = { ...application.additional_remarks };
+      } else if (typeof application.additional_remarks === "string") {
+        try {
+          ext = JSON.parse(application.additional_remarks.trim());
+        } catch {}
+      }
     }
 
     return res.status(200).json({
@@ -128,6 +171,21 @@ async function getApplicationById(req, res) {
       data: {
         ...application,
         ...ext,
+        volunteer_suggestion: ext.volunteer_suggestion || application.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
+        volunteer_name: ext.volunteer_name || application.volunteer_name || ext.tele_volunteer_name || "",
+        tele_volunteer_name: ext.tele_volunteer_name || ext.volunteer_name || application.volunteer_name || "",
+        tele_volunteer_email: ext.tele_volunteer_email || "",
+        tele_volunteer_phone: ext.tele_volunteer_phone || "",
+        tele_volunteer_role: ext.tele_volunteer_role || "",
+        tele_volunteer_affiliation: ext.tele_volunteer_affiliation || "",
+        tele_volunteer_suggestion: ext.tele_volunteer_suggestion || ext.volunteer_suggestion || application.volunteer_suggestion || "",
+        physical_volunteer_name: ext.physical_volunteer_name || "",
+        physical_volunteer_email: ext.physical_volunteer_email || "",
+        physical_volunteer_phone: ext.physical_volunteer_phone || "",
+        physical_volunteer_role: ext.physical_volunteer_role || "",
+        physical_volunteer_affiliation: ext.physical_volunteer_affiliation || "",
+        physical_volunteer_suggestion: ext.physical_volunteer_suggestion || "",
+        physical_verification_notes: ext.physical_verification_notes || "",
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(application.document_10th_marksheet || ""),
@@ -157,15 +215,22 @@ async function getApplicationById(req, res) {
 async function updateApplicationStatus(req, res) {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { status, reason, email: directEmail, name: directName, rejectionStage: directRejectionStage } = req.body;
 
     const allowedStatuses = [
       "draft",
       "submitted",
       "under_review",
       "telephonic_done",
+      "televerification_done",
+      "physical_verification_in_progress",
+      "physical_verification_done",
       "home_visit_done",
+      "video_interview_in_progress",
+      "video_interview_done",
       "shortlisted",
+      "direct_interview_in_progress",
+      "direct_interview_done",
       "selected",
       "scholarship_awarded",
       "rejected",
@@ -178,7 +243,142 @@ async function updateApplicationStatus(req, res) {
       });
     }
 
-    const data = await ApplicationModel.update(id, { status });
+    // Load existing record for metadata and email notification
+    let existing = null;
+    try {
+      existing = await ApplicationModel.findById(id);
+    } catch (eFind) {
+      console.warn("Could not fetch existing application:", eFind.message);
+    }
+
+    // Automatically synchronize current_stage and stage_status based on updated status across the 4 phases:
+    // First phase: Televerification
+    // Second phase: Physical Verification
+    // Third phase: Video Call Interview
+    // Fourth phase: Direct Interview (Final Stage)
+    let current_stage = "Phase 1: Televerification";
+    let stage_status = "In Progress";
+    if (status === "draft") {
+      current_stage = "Draft";
+      stage_status = "Not Submitted";
+    } else if (status === "submitted") {
+      current_stage = "Phase 1: Televerification";
+      stage_status = "Application Submitted";
+    } else if (status === "under_review") {
+      current_stage = "Phase 1: Televerification";
+      stage_status = "Televerification In Progress";
+    } else if (status === "telephonic_done" || status === "televerification_done") {
+      current_stage = "Phase 2: Physical Verification";
+      stage_status = "Waiting for Physical Verification";
+    } else if (status === "physical_verification_in_progress") {
+      current_stage = "Phase 2: Physical Verification";
+      stage_status = "Physical Verification In Progress";
+    } else if (status === "physical_verification_done" || status === "home_visit_done") {
+      current_stage = "Phase 3: Video Call Interview";
+      stage_status = "Waiting for Video Call Interview";
+    } else if (status === "video_interview_in_progress") {
+      current_stage = "Phase 3: Video Call Interview";
+      stage_status = "Video Call Interview In Progress";
+    } else if (status === "video_interview_done" || status === "shortlisted") {
+      current_stage = "Phase 4: Direct Interview";
+      stage_status = "Waiting for Direct Interview (Final Stage)";
+    } else if (status === "direct_interview_in_progress") {
+      current_stage = "Phase 4: Direct Interview";
+      stage_status = "Direct Interview In Progress";
+    } else if (status === "direct_interview_done") {
+      current_stage = "Final Selection";
+      stage_status = "Direct Interview Cleared";
+    } else if (status === "selected" || status === "scholarship_awarded") {
+      current_stage = "Final Selection";
+      stage_status = "Scholarship Awarded";
+    } else if (status === "rejected") {
+      current_stage = "Closed";
+      stage_status = "Rejected";
+    }
+
+    const updatePayload = {
+      status,
+      current_stage,
+      stage_status,
+    };
+
+    // If status is rejected, persist the rejection reason
+    if (status === "rejected") {
+      try {
+        let additionalRemarks = {};
+        if (typeof existing?.additional_remarks === "string") {
+          try {
+            additionalRemarks = JSON.parse(existing.additional_remarks || "{}");
+          } catch {
+            additionalRemarks = { customRemarks: existing.additional_remarks };
+          }
+        } else if (existing?.additional_remarks && typeof existing.additional_remarks === "object") {
+          additionalRemarks = { ...existing.additional_remarks };
+        }
+        const rejectionText = reason || "Application not shortlisted based on verification criteria.";
+        additionalRemarks.rejectionReason = rejectionText;
+
+        // Determine which phase was rejected (1: Initial, 2: Televerification, 3: Physical Verification, 4: Video Call, 5: Direct Interview)
+        const currentAppStatus = existing?.status || "";
+        let computedRejectionStage = 1;
+        if (
+          currentAppStatus === "direct_interview_done" ||
+          currentAppStatus === "direct_interview_in_progress"
+        ) {
+          computedRejectionStage = 5;
+        } else if (
+          currentAppStatus === "video_interview_done" ||
+          currentAppStatus === "video_interview_in_progress" ||
+          currentAppStatus === "shortlisted"
+        ) {
+          computedRejectionStage = 4;
+        } else if (
+          currentAppStatus === "physical_verification_done" ||
+          currentAppStatus === "physical_verification_in_progress" ||
+          currentAppStatus === "home_visit_done"
+        ) {
+          computedRejectionStage = 3;
+        } else if (
+          currentAppStatus === "telephonic_done" ||
+          currentAppStatus === "televerification_done" ||
+          currentAppStatus === "under_review" ||
+          additionalRemarks.volunteer_suggestion ||
+          additionalRemarks.volunteer_name ||
+          existing?.volunteer_name
+        ) {
+          computedRejectionStage = 2;
+        } else {
+          computedRejectionStage = 1;
+        }
+
+        additionalRemarks.rejectionStage = directRejectionStage || computedRejectionStage;
+        updatePayload.additional_remarks = JSON.stringify(additionalRemarks);
+      } catch (errRemarks) {
+        console.warn("Could not attach rejectionReason to additional_remarks:", errRemarks.message);
+      }
+    }
+
+    const data = await ApplicationModel.update(id, updatePayload);
+
+    // If application was rejected, send notification email to student via Resend
+    if (status === "rejected") {
+      const studentEmail = existing?.email || directEmail || data?.email;
+      const studentName = existing?.full_name || directName || data?.full_name || "Applicant";
+      const appNumber = existing?.application_number || data?.application_number || "MF-2025-APP";
+
+      if (studentEmail) {
+        EmailService.sendApplicationRejectionEmail({
+          toEmail: studentEmail,
+          studentName,
+          applicationNumber: appNumber,
+          rejectionReason: reason || "",
+        }).catch((emailErr) => {
+          console.error(`Failed to send rejection email to ${studentEmail}:`, emailErr.message);
+        });
+      } else {
+        console.warn(`⚠️ No email found for application ${id}; rejection email skipped.`);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -198,28 +398,252 @@ async function updateApplicationStatus(req, res) {
 /**
  * @controller  updateVolunteerSuggestion
  * @route       PATCH /admin/applications/:id/volunteer-suggestion
- * @desc        Update volunteer suggestion note for a student
+ * @desc        Update volunteer suggestion note for a student (Tele or Physical)
  */
 async function updateVolunteerSuggestion(req, res) {
   try {
     const { id } = req.params;
-    const { suggestion, volunteer_name } = req.body;
+    const suggestion =
+      req.body.suggestion !== undefined
+        ? req.body.suggestion
+        : req.body.volunteer_suggestion;
+    const volunteer_name =
+      req.body.volunteer_name !== undefined
+        ? req.body.volunteer_name
+        : (req.body.volunteerName || req.body.volunteer_name);
+    const phase = req.body.phase || "tele"; // "tele" or "physical"
+    const volunteer_email = req.body.volunteer_email || req.body.email;
+    const volunteer_phone = req.body.volunteer_phone || req.body.phone;
+    const volunteer_role = req.body.volunteer_role || req.body.role;
+    const volunteer_affiliation = req.body.volunteer_affiliation || req.body.affiliation;
 
-    const data = await ApplicationModel.update(id, {
-      volunteer_suggestion: suggestion || "",
-      volunteer_name: volunteer_name || null,
-    });
+    let existing = null;
+    try {
+      existing = await ApplicationModel.findById(id);
+    } catch (eFind) {
+      console.warn("Could not fetch existing application:", eFind.message);
+    }
+
+    const targetId = existing?.id || id;
+
+    let additionalRemarks = {};
+    if (typeof existing?.additional_remarks === "string") {
+      try {
+        additionalRemarks = JSON.parse(existing.additional_remarks.trim() || "{}");
+      } catch {
+        additionalRemarks = { customRemarks: existing.additional_remarks };
+      }
+    } else if (existing?.additional_remarks && typeof existing.additional_remarks === "object") {
+      additionalRemarks = { ...existing.additional_remarks };
+    }
+
+    if (phase === "physical") {
+      if (suggestion !== undefined) {
+        additionalRemarks.physical_volunteer_suggestion = suggestion;
+      }
+      if (volunteer_name !== undefined) {
+        additionalRemarks.physical_volunteer_name = volunteer_name;
+      }
+      if (volunteer_email !== undefined) {
+        additionalRemarks.physical_volunteer_email = volunteer_email;
+      }
+      if (volunteer_phone !== undefined) {
+        additionalRemarks.physical_volunteer_phone = volunteer_phone;
+      }
+      if (volunteer_role !== undefined) {
+        additionalRemarks.physical_volunteer_role = volunteer_role;
+      }
+      if (volunteer_affiliation !== undefined) {
+        additionalRemarks.physical_volunteer_affiliation = volunteer_affiliation;
+      }
+    } else {
+      if (suggestion !== undefined) {
+        additionalRemarks.volunteer_suggestion = suggestion;
+        additionalRemarks.tele_volunteer_suggestion = suggestion;
+      }
+      if (volunteer_name !== undefined) {
+        additionalRemarks.volunteer_name = volunteer_name;
+        additionalRemarks.tele_volunteer_name = volunteer_name;
+      }
+      if (volunteer_email !== undefined) {
+        additionalRemarks.tele_volunteer_email = volunteer_email;
+      }
+      if (volunteer_phone !== undefined) {
+        additionalRemarks.tele_volunteer_phone = volunteer_phone;
+      }
+      if (volunteer_role !== undefined) {
+        additionalRemarks.tele_volunteer_role = volunteer_role;
+      }
+      if (volunteer_affiliation !== undefined) {
+        additionalRemarks.tele_volunteer_affiliation = volunteer_affiliation;
+      }
+    }
+
+    const updatePayload = {
+      additional_remarks: JSON.stringify(additionalRemarks),
+      ...(phase === "physical"
+        ? {
+            physical_volunteer_suggestion: suggestion,
+            physical_volunteer_name: volunteer_name,
+            physical_volunteer_email: volunteer_email,
+            physical_volunteer_phone: volunteer_phone,
+            physical_volunteer_role: volunteer_role,
+            physical_volunteer_affiliation: volunteer_affiliation,
+          }
+        : {
+            volunteer_suggestion: suggestion,
+            volunteer_name: volunteer_name,
+            tele_volunteer_suggestion: suggestion,
+            tele_volunteer_name: volunteer_name,
+            tele_volunteer_email: volunteer_email,
+            tele_volunteer_phone: volunteer_phone,
+            tele_volunteer_role: volunteer_role,
+            tele_volunteer_affiliation: volunteer_affiliation,
+          }),
+    };
+
+    const data = await ApplicationModel.update(targetId, updatePayload);
 
     return res.status(200).json({
       success: true,
-      message: "Volunteer suggestion saved successfully",
-      data,
+      message: `${phase === "physical" ? "Physical" : "Telephonic"} volunteer suggestion saved successfully`,
+      data: {
+        ...(data || existing || {}),
+        ...additionalRemarks,
+        volunteer_suggestion: additionalRemarks.volunteer_suggestion,
+        volunteer_name: additionalRemarks.volunteer_name,
+        tele_volunteer_suggestion: additionalRemarks.tele_volunteer_suggestion,
+        tele_volunteer_name: additionalRemarks.tele_volunteer_name,
+        physical_volunteer_suggestion: additionalRemarks.physical_volunteer_suggestion,
+        physical_volunteer_name: additionalRemarks.physical_volunteer_name,
+      },
     });
   } catch (err) {
     console.error("updateVolunteerSuggestion error:", err);
     return res.status(500).json({
       success: false,
       message: "Server error saving volunteer suggestion",
+      error: err.message,
+    });
+  }
+}
+
+/**
+ * @controller  assignVolunteer
+ * @route       PATCH /admin/applications/:id/assign-volunteer
+ * @desc        Assign or reassign volunteer for Televerification or Physical Verification
+ */
+async function assignVolunteer(req, res) {
+  try {
+    const { id } = req.params;
+    const {
+      phase = "tele", // "tele" or "physical"
+      name,
+      email,
+      phone,
+      role,
+      affiliation,
+      eventId,
+      eventTitle,
+    } = req.body;
+
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Volunteer name is required for assignment",
+      });
+    }
+
+    let existing = null;
+    try {
+      existing = await ApplicationModel.findById(id);
+    } catch (eFind) {
+      console.warn("Could not fetch existing application:", eFind.message);
+    }
+
+    const targetId = existing?.id || id;
+    let additionalRemarks = {};
+    if (typeof existing?.additional_remarks === "string") {
+      try {
+        additionalRemarks = JSON.parse(existing.additional_remarks.trim() || "{}");
+      } catch {
+        additionalRemarks = { customRemarks: existing.additional_remarks };
+      }
+    } else if (existing?.additional_remarks && typeof existing.additional_remarks === "object") {
+      additionalRemarks = { ...existing.additional_remarks };
+    }
+
+    const updatePayload = {};
+
+    if (phase === "physical") {
+      additionalRemarks.physical_volunteer_name = name;
+      if (email) additionalRemarks.physical_volunteer_email = email;
+      if (phone) additionalRemarks.physical_volunteer_phone = phone;
+      if (role) additionalRemarks.physical_volunteer_role = role;
+      if (affiliation) additionalRemarks.physical_volunteer_affiliation = affiliation;
+      if (eventId) {
+        additionalRemarks.physical_event_id = eventId;
+        additionalRemarks.event_id = eventId;
+      }
+      if (eventTitle) {
+        additionalRemarks.physical_event_title = eventTitle;
+        additionalRemarks.event_title = eventTitle;
+      }
+
+      updatePayload.status = "physical_verification_in_progress";
+      updatePayload.current_stage = "Phase 2: Physical Verification";
+      updatePayload.stage_status = "Physical Verification In Progress";
+      updatePayload.physical_volunteer_name = name;
+      updatePayload.physical_volunteer_email = email;
+      updatePayload.physical_volunteer_phone = phone;
+      updatePayload.physical_volunteer_role = role;
+      updatePayload.physical_volunteer_affiliation = affiliation;
+    } else {
+      additionalRemarks.volunteer_name = name;
+      additionalRemarks.tele_volunteer_name = name;
+      if (email) additionalRemarks.tele_volunteer_email = email;
+      if (phone) additionalRemarks.tele_volunteer_phone = phone;
+      if (role) additionalRemarks.tele_volunteer_role = role;
+      if (affiliation) additionalRemarks.tele_volunteer_affiliation = affiliation;
+      if (eventId) {
+        additionalRemarks.tele_event_id = eventId;
+        additionalRemarks.event_id = eventId;
+      }
+      if (eventTitle) {
+        additionalRemarks.tele_event_title = eventTitle;
+        additionalRemarks.event_title = eventTitle;
+      }
+
+      if (existing?.status === "submitted" || existing?.status === "draft") {
+        updatePayload.status = "under_review";
+        updatePayload.current_stage = "Phase 1: Televerification";
+        updatePayload.stage_status = "Televerification In Progress";
+      }
+      updatePayload.volunteer_name = name;
+      updatePayload.tele_volunteer_name = name;
+      updatePayload.tele_volunteer_email = email;
+      updatePayload.tele_volunteer_phone = phone;
+      updatePayload.tele_volunteer_role = role;
+      updatePayload.tele_volunteer_affiliation = affiliation;
+    }
+
+    updatePayload.additional_remarks = JSON.stringify(additionalRemarks);
+    const data = await ApplicationModel.update(targetId, updatePayload);
+
+    return res.status(200).json({
+      success: true,
+      message: `Volunteer ${name} successfully assigned for ${phase === "physical" ? "Physical Verification" : "Televerification"}`,
+      data: {
+        ...(data || existing || {}),
+        ...additionalRemarks,
+        ...updatePayload,
+      },
+    });
+  } catch (err) {
+    console.error("assignVolunteer error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error assigning volunteer",
       error: err.message,
     });
   }
@@ -246,14 +670,32 @@ async function bulkUpdateVolunteerSuggestions(req, res) {
 
     for (const item of suggestions) {
       if (!item.suggestion && item.suggestion !== "") continue;
+      const appId = item.id || item.application_id;
+      if (!appId) continue;
       try {
-        if (item.id) {
-          await ApplicationModel.update(item.id, {
-            volunteer_suggestion: item.suggestion,
-            volunteer_name: item.volunteer_name || null,
-          });
-          updatedCount++;
+        const existing = await ApplicationModel.findById(appId);
+        let additionalRemarks = {};
+        if (typeof existing?.additional_remarks === "string") {
+          try {
+            additionalRemarks = JSON.parse(existing.additional_remarks || "{}");
+          } catch {
+            additionalRemarks = { customRemarks: existing.additional_remarks };
+          }
+        } else if (existing?.additional_remarks && typeof existing.additional_remarks === "object") {
+          additionalRemarks = { ...existing.additional_remarks };
         }
+
+        if (item.suggestion !== undefined) {
+          additionalRemarks.volunteer_suggestion = item.suggestion;
+        }
+        if (item.volunteer_name !== undefined) {
+          additionalRemarks.volunteer_name = item.volunteer_name;
+        }
+
+        await ApplicationModel.update(appId, {
+          additional_remarks: JSON.stringify(additionalRemarks),
+        });
+        updatedCount++;
       } catch (e) {
         errors.push({ item, error: e.message });
       }
@@ -334,6 +776,7 @@ module.exports = {
   getApplicationById,
   updateApplicationStatus,
   updateVolunteerSuggestion,
+  assignVolunteer,
   bulkUpdateVolunteerSuggestions,
   deleteApplication,
 };

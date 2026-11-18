@@ -2,6 +2,7 @@ const { supabase, supabaseAdmin } = require("../config/supabase");
 const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
 const { TwoFactorService } = require("../services/twoFactorService");
 const { EmailService } = require("../services/emailService");
+const { JwtService } = require("../services/jwtService");
 
 // Helper to format Indian phone numbers to E.164 format (+91XXXXXXXXXX)
 function formatPhoneNumber(phone) {
@@ -261,28 +262,8 @@ async function verifyOtp(req, res) {
         },
       };
 
-      // Create initial application draft record in applications table
-      try {
-        const { data: existingApp } = await supabaseAdmin
-          .from("applications")
-          .select("id, application_number, status")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (!existingApp) {
-          const appNum = await generateNextApplicationNumber();
-          await supabaseAdmin.from("applications").insert({
-            user_id: userId,
-            application_number: appNum,
-            full_name: fullName || devRecord.fullName || "Student Applicant",
-            mobile_number: userPayload.phone || phone,
-            email: userPayload.email || email,
-            status: "draft",
-          });
-        }
-      } catch (dbErr) {
-        console.warn("Could not insert initial application draft:", dbErr.message);
-      }
+      // In dev fallback mode, we also avoid auto-creating empty placeholder drafts in applications table.
+      // An application record is created when the applicant fills and saves/submits the form.
 
       return res.status(200).json({
         success: true,
@@ -331,46 +312,48 @@ async function verifyOtp(req, res) {
 
     const { session, user } = data;
 
-    // Create initial application draft record in applications table if needed
-    if (user) {
+    // Update user metadata with phone if provided during signup
+    if (user && phone && !user.user_metadata?.phone) {
       try {
-        // Update user metadata with phone if provided during signup
-        if (phone && !user.user_metadata?.phone) {
-          await supabaseAdmin.auth.admin.updateUserById(user.id, {
-            user_metadata: {
-              ...user.user_metadata,
-              phone: formatPhoneNumber(phone),
-              full_name: fullName || user.user_metadata?.full_name,
-            },
-          });
-        }
-
-        const { data: existingApp } = await supabaseAdmin
-          .from("applications")
-          .select("id, application_number, status")
-          .eq("user_id", user.id)
-          .maybeSingle();
-
-        if (!existingApp) {
-          const appNum = await generateNextApplicationNumber();
-          await supabaseAdmin.from("applications").insert({
-            user_id: user.id,
-            application_number: appNum,
-            full_name: fullName || user.user_metadata?.full_name || "Student Applicant",
-            mobile_number: phone || user.phone,
-            email: user.email || email,
-            status: "draft",
-          });
-        }
-      } catch (dbErr) {
-        console.warn("Could not insert initial application draft:", dbErr.message);
+        await supabaseAdmin.auth.admin.updateUserById(user.id, {
+          user_metadata: {
+            ...user.user_metadata,
+            phone: formatPhoneNumber(phone),
+            full_name: fullName || user.user_metadata?.full_name,
+          },
+        });
+      } catch (metaErr) {
+        console.warn("Could not update user metadata:", metaErr.message);
       }
     }
+
+    // Generate custom 7-hour JWT access token
+    const jwtToken = JwtService.signToken({
+      id: user.id,
+      email: user.email,
+      role: user.user_metadata?.role || "applicant",
+      phone: user.phone || user.user_metadata?.phone,
+      user_metadata: user.user_metadata,
+      type: "user",
+    });
+
+    const enhancedSession = session ? {
+      ...session,
+      access_token: jwtToken || session.access_token,
+      expires_in: 7 * 3600, // 7 hours in seconds
+      token_type: "bearer",
+    } : {
+      access_token: jwtToken,
+      expires_in: 7 * 3600,
+      token_type: "bearer",
+    };
 
     return res.status(200).json({
       success: true,
       message: "OTP verified successfully. Authenticated into Supabase.",
-      session,
+      token: jwtToken,
+      expiresIn: "7h",
+      session: enhancedSession,
       user,
     });
   } catch (err) {
@@ -465,33 +448,8 @@ async function signup(req, res) {
       });
     }
 
-    const userId = createdUser?.user?.id;
-
-    // 2. Automatically create initial draft application in applications table
-    if (userId) {
-      try {
-        const { data: existingApp } = await supabaseAdmin
-          .from("applications")
-          .select("id")
-          .eq("user_id", userId)
-          .maybeSingle();
-
-        if (!existingApp) {
-          const appNum = await generateNextApplicationNumber();
-          await supabaseAdmin.from("applications").insert({
-            user_id: userId,
-            application_number: appNum,
-            full_name: fullName.trim(),
-            mobile_number: mobileNumber.trim(),
-            email: cleanEmail,
-            status: "draft",
-          });
-        }
-      } catch (appErr) {
-        console.warn("Could not pre-create application draft on signup:", appErr.message);
-      }
-    }
-
+    // Note: We do NOT insert an empty placeholder in the applications table on signup.
+    // The application will be created when the student actually fills and saves/submits their form.
     return res.status(201).json({
       success: true,
       message: "Account created successfully! Please sign in with your credentials.",
@@ -570,35 +528,33 @@ async function login(req, res) {
       }
     }
 
-    // Ensure draft application exists
-    if (user) {
-      try {
-        const { data: existingApp } = await supabaseAdmin
-          .from("applications")
-          .select("id")
-          .eq("user_id", user.id)
-          .maybeSingle();
+    // Generate custom 7-hour JWT access token
+    const jwtToken = JwtService.signToken({
+      id: user.id,
+      email: user.email,
+      role: user.user_metadata?.role || "applicant",
+      phone: user.phone || user.user_metadata?.phone,
+      user_metadata: user.user_metadata,
+      type: "user",
+    });
 
-        if (!existingApp) {
-          const appNum = await generateNextApplicationNumber();
-          await supabaseAdmin.from("applications").insert({
-            user_id: user.id,
-            application_number: appNum,
-            full_name: user.user_metadata?.full_name || "Student Applicant",
-            mobile_number: user.user_metadata?.phone || user.phone,
-            email: user.email,
-            status: "draft",
-          });
-        }
-      } catch (appErr) {
-        console.warn("Could not verify application draft on login:", appErr.message);
-      }
-    }
+    const enhancedSession = session ? {
+      ...session,
+      access_token: jwtToken || session.access_token,
+      expires_in: 7 * 3600, // 7 hours in seconds
+      token_type: "bearer",
+    } : {
+      access_token: jwtToken,
+      expires_in: 7 * 3600,
+      token_type: "bearer",
+    };
 
     return res.status(200).json({
       success: true,
       message: "Login successful!",
-      session,
+      token: jwtToken,
+      expiresIn: "7h",
+      session: enhancedSession,
       user,
     });
   } catch (err) {

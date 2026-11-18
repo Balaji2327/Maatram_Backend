@@ -184,6 +184,148 @@ class EmailService {
 
     return { success: true };
   }
+
+  /**
+   * Send Application Rejection email to student via Resend
+   * @param {Object} params
+   * @param {string} params.toEmail - Student's recipient email
+   * @param {string} [params.studentName] - Student's full name
+   * @param {string} [params.applicationNumber] - Application Number (e.g. MF-2025-003)
+   * @param {string} [params.rejectionReason] - Rejection remarks / note
+   */
+  static async sendApplicationRejectionEmail({
+    toEmail,
+    studentName = "Applicant",
+    applicationNumber = "MF-2025-APP",
+    rejectionReason = "",
+  }) {
+    if (!toEmail) {
+      console.warn("⚠️ Cannot send rejection email: No recipient email provided.");
+      return { success: false, message: "Recipient email required" };
+    }
+
+    const fromEmail = process.env.FROM_EMAIL || "info@maatram.tech";
+    const fromName = (process.env.FROM_NAME || "Maatram Foundation").replace(/"/g, "");
+    const emailSubject = "Your application rejected by maatram foundation";
+
+    const reasonSection = rejectionReason
+      ? `
+        <div style="background-color: #fff1f2; border: 1px solid #fecdd3; border-radius: 10px; padding: 14px 18px; margin: 20px 0;">
+          <p style="margin: 0; font-size: 13px; color: #9f1239; font-weight: bold;">Review Committee Remarks:</p>
+          <p style="margin: 6px 0 0; font-size: 13px; color: #881337; line-height: 1.5;">${rejectionReason}</p>
+        </div>
+      `
+      : "";
+
+    const htmlContent = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
+        <div style="text-align: center; margin-bottom: 24px; border-bottom: 2px solid #0f172a; padding-bottom: 16px;">
+          <h2 style="color: #0f172a; margin: 0 0 6px; font-size: 22px; font-weight: 800; letter-spacing: 0.5px;">MAATRAM FOUNDATION</h2>
+          <p style="margin: 0; color: #475569; font-size: 13px; font-weight: bold;">Higher Education 100% Free Sponsorship Program</p>
+        </div>
+
+        <div style="padding: 18px 20px; background-color: #fef2f2; border-left: 5px solid #ef4444; border-radius: 10px; margin-bottom: 22px;">
+          <h3 style="color: #991b1b; margin: 0 0 6px; font-size: 17px; font-weight: 800;">
+            Application Status Notification
+          </h3>
+          <p style="color: #b91c1c; margin: 0; font-size: 15px; font-weight: bold; line-height: 1.5;">
+            Your application rejected by maatram foundation.
+          </p>
+        </div>
+
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Dear <strong>${studentName}</strong>,
+        </p>
+
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          Thank you for applying to the <strong>Maatram Educational &amp; Charitable Trust</strong> Free Higher Education Sponsorship Program (Admission Track 2025–2026).
+        </p>
+
+        <p style="color: #334155; font-size: 14px; line-height: 1.6;">
+          After careful consideration and review of your application (Application No: <strong style="font-family: monospace; color: #0f172a;">${applicationNumber}</strong>), we regret to inform you that <strong>your application rejected by maatram foundation</strong> and has not been shortlisted for the current academic year.
+        </p>
+
+        ${reasonSection}
+
+        <p style="color: #64748b; font-size: 13px; line-height: 1.6;">
+          Due to strict sponsorship quotas and high volume of eligible candidates across Tamil Nadu, our review committee must adhere strictly to verified academic and socio-economic priority criteria. We sincerely appreciate your efforts and wish you great success in all your future educational and career endeavors.
+        </p>
+
+        <div style="margin-top: 32px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #94a3b8; text-align: center;">
+          <p style="margin: 2px 0; font-weight: bold; color: #64748b;">Maatram Educational &amp; Charitable Trust</p>
+          <p style="margin: 2px 0;">Chennai Central Office • info@maatram.tech</p>
+          <p style="margin: 4px 0 0; color: #cbd5e1;">Sent to registered applicant: ${toEmail}</p>
+        </div>
+      </div>
+    `;
+
+    const textContent = `
+Dear ${studentName},
+
+Your application rejected by maatram foundation.
+
+Application Number: ${applicationNumber}
+
+Thank you for applying to the Maatram Foundation Higher Education Sponsorship Program. After verification by our admissions committee, your application was not shortlisted for sponsorship for the 2025-2026 academic year.
+
+${rejectionReason ? `Remarks: ${rejectionReason}\n\n` : ""}We wish you success in your future higher education endeavors.
+
+Maatram Educational & Charitable Trust
+info@maatram.tech
+    `.trim();
+
+    // 1. Try sending via Resend REST API first if Resend API key is available
+    const resendApiKey = process.env.SMTP_PASSWORD;
+    if (resendApiKey && resendApiKey.startsWith("re_")) {
+      try {
+        const response = await fetch("https://api.resend.com/emails", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${resendApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            from: `"${fromName}" <${fromEmail}>`,
+            to: [toEmail],
+            subject: emailSubject,
+            text: textContent,
+            html: htmlContent,
+          }),
+        });
+
+        const result = await response.json();
+        if (response.ok && result.id) {
+          console.log(`✅ Rejection email sent to ${toEmail} via Resend API (id: ${result.id})`);
+          return { success: true, id: result.id, method: "resend_api" };
+        } else {
+          console.warn(`Resend API returned non-OK status:`, result);
+        }
+      } catch (apiErr) {
+        console.warn(`Resend API fetch failed, trying SMTP fallback:`, apiErr.message);
+      }
+    }
+
+    // 2. Fallback to Nodemailer SMTP (smtp.resend.com:587)
+    const transporter = EmailService.getTransporter();
+    if (transporter) {
+      try {
+        const info = await transporter.sendMail({
+          from: `"${fromName}" <${fromEmail}>`,
+          to: toEmail,
+          subject: emailSubject,
+          text: textContent,
+          html: htmlContent,
+        });
+        console.log(`✅ Rejection email sent to ${toEmail} via SMTP (messageId: ${info.messageId})`);
+        return { success: true, messageId: info.messageId, method: "smtp" };
+      } catch (smtpErr) {
+        console.error(`❌ Failed to dispatch rejection email to ${toEmail} via SMTP:`, smtpErr.message);
+        return { success: false, error: smtpErr.message };
+      }
+    }
+
+    return { success: false, message: "No email transporter configured" };
+  }
 }
 
 module.exports = { EmailService };

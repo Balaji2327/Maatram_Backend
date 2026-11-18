@@ -1,5 +1,6 @@
 const { AdminService, verifyPassword, hashPassword } = require("../services/adminService");
 const { TwoFactorService } = require("../services/twoFactorService");
+const { JwtService } = require("../services/jwtService");
 
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
@@ -86,15 +87,20 @@ async function adminLogin(req, res) {
       }
     }
 
-    // 5. Generate secure session token
-    const tokenPayload = `${admin.id}:${admin.email}:${Date.now()}`;
-    const token = "adm_token_" + Buffer.from(tokenPayload).toString("base64");
+    // 5. Generate secure JWT session token (expires in 7 hours)
+    const token = JwtService.signToken({
+      id: admin.id,
+      email: admin.email,
+      role: admin.role || "admin",
+      type: "admin",
+    });
 
     return res.status(200).json({
       success: true,
       message: "Admin authentication successful",
       token,
       adminToken: token,
+      expiresIn: "7h",
       user: {
         id: admin.id,
         name: admin.name || "Administrator",
@@ -255,12 +261,19 @@ async function changeEmail(req, res) {
     }
 
     const updated = await AdminService.updateAdmin(admin.id, { email: cleanEmail });
-    const newAdminToken = "adm_token_" + Buffer.from(admin.id + ":" + cleanEmail).toString("base64");
+    const newAdminToken = JwtService.signToken({
+      id: updated.id,
+      email: cleanEmail,
+      role: updated.role || "admin",
+      type: "admin",
+    });
 
     return res.status(200).json({
       success: true,
       message: "Login email updated successfully.",
       adminToken: newAdminToken,
+      token: newAdminToken,
+      expiresIn: "7h",
       user: {
         id: updated.id,
         name: updated.name,

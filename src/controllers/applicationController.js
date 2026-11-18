@@ -67,6 +67,7 @@ function mapFormDataToDb(formData) {
     sameAsPermanent: formData.sameAsPermanent ?? false,
     villageTown: formData.villageTown || "",
     residenceType: formData.residenceType || "",
+    rentAmount: formData.rentAmount || "",
     collegeDistance: formData.collegeDistance || "",
     firstGraduate: formData.firstGraduate ?? false,
     secondBranch: formData.secondBranch || "",
@@ -115,6 +116,7 @@ function mapFormDataToDb(formData) {
     guardian_income: formData.guardianIncome || formData.guardianMonthlyIncome,
     family_annual_income: formData.annualIncome || formData.familyAnnualIncome || formData.annualFamilyIncome,
     housing_status: formData.residenceType || formData.housingStatus,
+    rent_amount: formData.rentAmount || null,
     first_graduate: Boolean(formData.firstGraduate),
     single_parent: Boolean(formData.singleParent || formData.familySituation === "Single parent"),
     orphan: Boolean(formData.orphan || formData.familySituation === "Orphan"),
@@ -248,6 +250,7 @@ function mapDbToFormData(row) {
     pincode: row.pincode || "",
     residenceType: ext.residenceType || row.housing_status || "Own",
     housingStatus: row.housing_status || ext.residenceType || "Own",
+    rentAmount: row.rent_amount || ext.rentAmount || "",
     collegeDistance: ext.collegeDistance || "",
 
     // E. Educational Information
@@ -334,6 +337,14 @@ function mapDbToFormData(row) {
     s3_document_income_key: ext.documentIncomeCertificate || "",
     s3_document_aadhaar_key: row.document_aadhaar_card || "",
     s3_document_parent_id_key: ext.documentParentIdProof || "",
+
+    // Admin Rejection Reason / Remarks
+    rejectionReason:
+      ext.rejectionReason ||
+      (ext.volunteer_suggestion?.startsWith("Application rejected:")
+        ? ext.volunteer_suggestion.replace("Application rejected:", "").trim()
+        : ""),
+    rejectionStage: ext.rejectionStage || (ext.volunteer_name || row.volunteer_name ? 2 : 1),
   };
 }
 
@@ -526,9 +537,30 @@ async function getStatus(req, res) {
 
     const { data: app } = await supabaseAdmin
       .from("applications")
-      .select("application_number, status, current_stage, stage_status, submitted_at")
+      .select("application_number, status, current_stage, stage_status, submitted_at, additional_remarks")
       .eq("user_id", userId)
       .maybeSingle();
+
+    let rejectionReason = "";
+    let rejectionStage = 1;
+    try {
+      if (app?.additional_remarks) {
+        const parsed =
+          typeof app.additional_remarks === "string"
+            ? JSON.parse(app.additional_remarks)
+            : app.additional_remarks;
+        if (parsed?.rejectionReason) {
+          rejectionReason = parsed.rejectionReason;
+        } else if (parsed?.volunteer_suggestion && parsed.volunteer_suggestion.startsWith("Application rejected:")) {
+          rejectionReason = parsed.volunteer_suggestion.replace("Application rejected:", "").trim();
+        }
+        if (parsed?.rejectionStage) {
+          rejectionStage = Number(parsed.rejectionStage) || 1;
+        }
+      }
+    } catch {
+      // ignore JSON parse error
+    }
 
     return res.status(200).json({
       success: true,
@@ -537,6 +569,8 @@ async function getStatus(req, res) {
       currentStage: app?.current_stage || "Stage 01",
       stageStatus: app?.stage_status || "In Progress",
       submittedAt: app?.submitted_at,
+      rejectionReason: rejectionReason || undefined,
+      rejectionStage: app?.status === "rejected" ? rejectionStage : undefined,
     });
   } catch (err) {
     console.error("getStatus error:", err);

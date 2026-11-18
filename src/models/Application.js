@@ -12,12 +12,20 @@ class ApplicationModel {
     return data;
   }
 
+  static isUUID(str) {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(str || ""));
+  }
+
   static async findById(id) {
-    const { data, error } = await supabaseAdmin
-      .from("applications")
-      .select("*")
-      .eq("id", id)
-      .maybeSingle();
+    if (!id) return null;
+    const isIdUuid = ApplicationModel.isUUID(id);
+    let query = supabaseAdmin.from("applications").select("*");
+    if (isIdUuid) {
+      query = query.eq("id", id);
+    } else {
+      query = query.eq("application_number", id);
+    }
+    const { data, error } = await query.maybeSingle();
 
     if (error) throw new Error(error.message);
     return data;
@@ -54,15 +62,91 @@ class ApplicationModel {
   }
 
   static async update(id, updates) {
+    if (!id) throw new Error("Missing application ID or application_number for update");
+    const payload = { ...updates };
+    const isIdUuid = ApplicationModel.isUUID(id);
+    const filterCol = isIdUuid ? "id" : "application_number";
+
+    // Safety guard: Extended virtual fields stored in additional_remarks
+    const virtualFields = [
+      "volunteer_name",
+      "volunteerName",
+      "volunteer_suggestion",
+      "volunteerSuggestion",
+      "tele_volunteer_name",
+      "tele_volunteer_email",
+      "tele_volunteer_phone",
+      "tele_volunteer_role",
+      "tele_volunteer_affiliation",
+      "tele_volunteer_suggestion",
+      "physical_volunteer_name",
+      "physical_volunteer_email",
+      "physical_volunteer_phone",
+      "physical_volunteer_role",
+      "physical_volunteer_affiliation",
+      "physical_volunteer_suggestion",
+      "physical_verification_notes",
+      "physical_verification_status",
+      "video_volunteer_name",
+      "video_volunteer_suggestion",
+      "direct_volunteer_name",
+      "direct_volunteer_suggestion",
+      "rejectionReason",
+      "rejectionStage",
+      "studentPhoto",
+      "documentCommunityCertificate",
+      "documentIncomeCertificate",
+      "documentParentIdProof",
+    ];
+
+    const hasVirtualField = virtualFields.some((f) => payload[f] !== undefined);
+
+    if (hasVirtualField || payload.additional_remarks !== undefined) {
+      let additionalRemarks = {};
+      if (payload.additional_remarks) {
+        try {
+          additionalRemarks =
+            typeof payload.additional_remarks === "string"
+              ? JSON.parse(payload.additional_remarks)
+              : payload.additional_remarks;
+        } catch {
+          additionalRemarks = { customRemarks: payload.additional_remarks };
+        }
+      } else {
+        try {
+          const { data: current } = await supabaseAdmin
+            .from("applications")
+            .select("additional_remarks")
+            .eq(filterCol, id)
+            .maybeSingle();
+          if (current?.additional_remarks) {
+            additionalRemarks =
+              typeof current.additional_remarks === "string"
+                ? JSON.parse(current.additional_remarks)
+                : current.additional_remarks;
+          }
+        } catch {}
+      }
+
+      for (const field of virtualFields) {
+        if (payload[field] !== undefined) {
+          additionalRemarks[field] = payload[field];
+          delete payload[field];
+        }
+      }
+
+      payload.additional_remarks = JSON.stringify(additionalRemarks);
+    }
+
     const { data, error } = await supabaseAdmin
       .from("applications")
       .update({
-        ...updates,
+        ...payload,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", id)
+      .eq(filterCol, id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw new Error(error.message);
     return data;

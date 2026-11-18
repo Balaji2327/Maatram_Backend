@@ -417,6 +417,24 @@ class EventModel {
     const updatedDesc = packEventDescription(cleanDescription, meta);
     await supabaseAdmin.from("events").update({ description: updatedDesc }).eq("id", eventId);
 
+    // Synchronize assigned volunteer name & status in applications database
+    for (const item of matchedApplicants) {
+      const applicantId = item.applicant_id || item.id;
+      if (applicantId) {
+        try {
+          await ApplicationModel.update(applicantId, {
+            volunteer_name: volEntry.name || "Volunteer",
+            volunteer_suggestion: `Assigned via Mark AI for event "${event.title || "Televerification Drive"}" to ${volEntry.name} (${volEntry.role || "volunteer"}).`,
+            status: "under_review",
+            current_stage: "Stage 01",
+            stage_status: "Telephonic In Progress",
+          });
+        } catch (syncErr) {
+          console.warn(`[EventModel] Could not sync volunteer assignment to applicant ${applicantId}:`, syncErr.message);
+        }
+      }
+    }
+
     return {
       success: true,
       message: `Admin approved! Successfully assigned ${matchedApplicants.length} applicants to ${volEntry.name}.`,

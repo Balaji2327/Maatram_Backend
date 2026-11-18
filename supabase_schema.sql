@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS public.applications (
     state VARCHAR(100) DEFAULT 'Tamil Nadu',
     pincode VARCHAR(10),
     residence_type VARCHAR(50),
+    rent_amount VARCHAR(50),
     college_distance VARCHAR(50),
 
     -- Academic Qualifications
@@ -209,6 +210,9 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='residence_type') THEN
         ALTER TABLE public.applications ADD COLUMN residence_type VARCHAR(50);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='rent_amount') THEN
+        ALTER TABLE public.applications ADD COLUMN rent_amount VARCHAR(50);
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='college_distance') THEN
         ALTER TABLE public.applications ADD COLUMN college_distance VARCHAR(50);

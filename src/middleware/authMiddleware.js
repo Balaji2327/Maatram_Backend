@@ -1,8 +1,10 @@
 const { supabaseAdmin } = require("../config/supabase");
+const { JwtService } = require("../services/jwtService");
 
 /**
- * Middleware to verify Supabase Auth JWT token
- * Validates user exists in auth.users and sets req.user
+ * Middleware to verify JWT token
+ * Supports both custom signed JWTs (7 hours expiry) and Supabase Auth tokens
+ * Validates user exists and sets req.user
  */
 async function authenticateToken(req, res, next) {
   try {
@@ -15,6 +17,38 @@ async function authenticateToken(req, res, next) {
     }
 
     const token = authHeader.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authorization token required",
+      });
+    }
+
+    // 1. First attempt to verify with our internal JwtService
+    try {
+      const decoded = JwtService.verifyToken(token);
+      if (decoded && decoded.id) {
+        req.user = {
+          id: decoded.id,
+          email: decoded.email,
+          role: decoded.role || "applicant",
+          user_metadata: decoded.user_metadata || {},
+          phone: decoded.phone,
+        };
+        return next();
+      }
+    } catch (jwtErr) {
+      if (jwtErr.name === "TokenExpiredError") {
+        return res.status(401).json({
+          success: false,
+          code: "TOKEN_EXPIRED",
+          message: "Session expired (7 hours limit). Please sign in again.",
+        });
+      }
+      // If JsonWebTokenError (e.g. invalid signature), fallback to verify via Supabase Auth
+    }
+
+    // 2. Fallback to Supabase Auth token verification
     const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
 
     if (error || !user) {
