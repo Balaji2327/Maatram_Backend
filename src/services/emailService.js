@@ -4,6 +4,21 @@ const nodemailer = require("nodemailer");
  * Service to dispatch email notifications using Resend SMTP or configured SMTP
  */
 class EmailService {
+  static async notifyAdmissions(app) {
+    const transporter = this.getTransporter();
+    const to = process.env.ADMIN_EMAIL;
+    if (!transporter || !to) throw new Error("Admissions email is not configured.");
+    const origin = process.env.ADMIN_PORTAL_URL || process.env.NEXT_PUBLIC_FRONTEND_URL || "http://localhost:3000";
+    const link = new URL("/admin/applications", origin);
+    link.searchParams.set("applicantId", app.id);
+    await transporter.sendMail({
+      from: process.env.FROM_EMAIL || "info@maatram.tech", to,
+      subject: `Application submitted: ${app.application_number}`,
+      text: [`New scholarship application from ${app.full_name}.`, `Application number: ${app.application_number}`,
+        `Preferred degree: ${app.preferred_degree || "Unspecified"}`, `Review submitted form: ${link.href}`].join("\n"),
+    });
+  }
+
   static getTransporter() {
     const host = process.env.SMTP_HOST || "smtp.resend.com";
     const port = parseInt(process.env.SMTP_PORT || "587", 10);

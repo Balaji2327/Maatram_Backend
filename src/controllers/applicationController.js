@@ -1,5 +1,6 @@
 const { supabaseAdmin } = require("../config/supabase");
 const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
+const { EmailService } = require("../services/emailService");
 const { StorageService } = require("../services/storageService");
 
 /**
@@ -14,7 +15,7 @@ async function processDocumentUpload(docVal, fieldName) {
       return s3Key;
     } catch (err) {
       console.error(`[AWS S3] Failed to upload document ${fieldName}:`, err.message);
-      return docVal;
+      throw err;
     }
   }
   return docVal;
@@ -47,9 +48,14 @@ async function uploadAllApplicationDocuments(formData) {
   return processed;
 }
 
+function yes(value) { return value === true || value === "Yes" || value === "true"; }
+
 function mapFormDataToDb(formData) {
   // Extract and serialize any extended fields into additional_remarks JSON wrapper
   const extendedData = {
+    state: formData.state, tenthSubjects: formData.tenthSubjects, mediumOfInstruction: formData.mediumOfInstruction,
+    declarationAgreed: formData.declarationAgreed, eleventhStream: formData.eleventhStream, careerGoal: formData.careerGoal,
+    firstGenerationLearner: formData.firstGenerationLearner,
     whatsappNumber: formData.whatsappNumber || "",
     community: formData.community || "",
     nationality: formData.nationality || "Indian",
@@ -117,10 +123,10 @@ function mapFormDataToDb(formData) {
     family_annual_income: formData.annualIncome || formData.familyAnnualIncome || formData.annualFamilyIncome,
     housing_status: formData.residenceType || formData.housingStatus,
     rent_amount: formData.rentAmount || null,
-    first_graduate: Boolean(formData.firstGraduate),
-    single_parent: Boolean(formData.singleParent || formData.familySituation === "Single parent"),
-    orphan: Boolean(formData.orphan || formData.familySituation === "Orphan"),
-    differently_abled: Boolean(formData.differentlyAbled),
+    first_graduate: yes(formData.firstGraduate),
+    single_parent: Boolean(yes(formData.singleParent) || formData.familySituation === "Single parent"),
+    orphan: Boolean(yes(formData.orphan) || formData.familySituation === "Orphan"),
+    differently_abled: yes(formData.differentlyAbled),
     siblings: formData.siblings || [],
 
     // 10th Standard
@@ -158,7 +164,7 @@ function mapFormDataToDb(formData) {
     preferred_degree: formData.preferredDegree,
     preferred_courses: formData.preferredCourses || (formData.preferredBranch ? [formData.preferredBranch, formData.secondBranch].filter(Boolean) : []),
     preferred_districts: formData.preferredDistricts || (formData.preferredCollegeLocation ? [formData.preferredCollegeLocation] : []),
-    hostel_required: Boolean(formData.hostelRequired),
+    hostel_required: yes(formData.hostelRequired),
     additional_remarks: JSON.stringify(extendedData),
 
     // Documents
@@ -177,7 +183,8 @@ function mapDbToFormData(row) {
   let ext = {};
   if (row.additional_remarks) {
     try {
-      if (row.additional_remarks.startsWith("{")) {
+      if (typeof row.additional_remarks === "object") ext = row.additional_remarks;
+      else if (row.additional_remarks.startsWith("{")) {
         ext = JSON.parse(row.additional_remarks);
       }
     } catch {
@@ -190,6 +197,8 @@ function mapDbToFormData(row) {
   const secondaryCourse = (Array.isArray(preferredCourses) && preferredCourses[1]) || ext.secondBranch || "";
 
   return {
+    tenthSubjects: ext.tenthSubjects || [], mediumOfInstruction: ext.mediumOfInstruction, declarationAgreed: ext.declarationAgreed,
+    eleventhStream: ext.eleventhStream, careerGoal: ext.careerGoal,
     id: row.id,
     applicationNumber: row.application_number,
     status: row.status,
@@ -208,8 +217,8 @@ function mapDbToFormData(row) {
     email: row.email || "",
     aadhaarNumber: row.aadhaar_number || "",
     community: ext.community || "",
-    nationality: ext.nationality || "Indian",
-    maritalStatus: ext.maritalStatus || "Single",
+    nationality: ext.nationality || "",
+    maritalStatus: ext.maritalStatus || "",
 
     // B. Family Information
     fatherName: row.father_name || "",
@@ -226,7 +235,7 @@ function mapDbToFormData(row) {
     familyAnnualIncome: row.family_annual_income || "",
     annualFamilyIncome: row.family_annual_income || "",
     familyMembersCount: ext.familyMembersCount || "",
-    familyType: ext.familyType || "Nuclear",
+    familyType: ext.familyType || "",
     familySituation: ext.familySituation || (row.orphan ? "Orphan" : row.single_parent ? "Single parent" : "Both parents"),
     guardianName: row.guardian_name || "",
     guardianOccupation: row.guardian_occupation || "",
@@ -246,10 +255,10 @@ function mapDbToFormData(row) {
     address: row.address || "",
     villageTown: ext.villageTown || "",
     district: row.district || "",
-    state: ext.state || "Tamil Nadu",
+    state: ext.state || "",
     pincode: row.pincode || "",
-    residenceType: ext.residenceType || row.housing_status || "Own",
-    housingStatus: row.housing_status || ext.residenceType || "Own",
+    residenceType: ext.residenceType || row.housing_status || "",
+    housingStatus: row.housing_status || ext.residenceType || "",
     rentAmount: row.rent_amount || ext.rentAmount || "",
     collegeDistance: ext.collegeDistance || "",
 
@@ -257,7 +266,7 @@ function mapDbToFormData(row) {
     tenthSchool: row.tenth_school_name || "",
     tenthSchoolName: row.tenth_school_name || "",
     tenthSchoolAddress: row.tenth_school_address || "",
-    tenthBoard: row.tenth_board || "State Board",
+    tenthBoard: row.tenth_board || "",
     tenthYear: row.tenth_pass_year || "",
     tenthPassYear: row.tenth_pass_year || "",
     tenthTotalMarks: row.tenth_marks_obtained?.toString() || "",
@@ -268,7 +277,7 @@ function mapDbToFormData(row) {
     eleventhSchool: row.eleventh_school_name || "",
     eleventhSchoolName: row.eleventh_school_name || "",
     eleventhSchoolAddress: row.eleventh_school_address || "",
-    eleventhBoard: row.eleventh_board || "State Board",
+    eleventhBoard: row.eleventh_board || "",
     eleventhPassYear: row.eleventh_pass_year || "",
     eleventhSubjects: row.eleventh_subjects || [],
     eleventhTotalMarks: row.eleventh_total_marks?.toString() || "",
@@ -278,7 +287,7 @@ function mapDbToFormData(row) {
     twelfthSchool: row.twelfth_school_name || "",
     twelfthSchoolName: row.twelfth_school_name || "",
     twelfthSchoolAddress: row.twelfth_school_address || "",
-    twelfthBoard: row.twelfth_board || "State Board",
+    twelfthBoard: row.twelfth_board || "",
     twelfthYear: row.twelfth_pass_year || "",
     twelfthPassYear: row.twelfth_pass_year || "",
     twelfthGroup: row.twelfth_group || "",
@@ -288,7 +297,7 @@ function mapDbToFormData(row) {
     twelfthMaxMarks: row.twelfth_max_marks?.toString() || "600",
     twelfthPercentage: row.twelfth_percentage?.toString() || "",
     twelfthCutoff: row.twelfth_cutoff?.toString() || "",
-    firstGraduate: row.first_graduate ?? ext.firstGraduate ?? false,
+    firstGraduate: row.first_graduate ?? ext.firstGraduate ?? "",
     preferredDegree: row.preferred_degree || "",
     preferredBranch: primaryCourse,
     secondBranch: secondaryCourse,
@@ -309,14 +318,14 @@ function mapDbToFormData(row) {
     // G. Personal and Background Information
     orphan: row.orphan ?? (ext.familySituation === "Orphan"),
     singleParent: row.single_parent ?? (ext.familySituation === "Single parent"),
-    firstGenerationLearner: ext.firstGraduate || row.first_graduate || false,
+    firstGenerationLearner: ext.firstGenerationLearner ?? row.first_graduate ?? ext.firstGraduate,
     differentlyAbled: row.differently_abled ?? false,
     specialCircumstances: ext.specialCircumstances || "",
     careerAmbition: ext.careerAmbition || "",
     higherEducationReason: ext.higherEducationReason || "",
-    willingToRelocateTN: ext.willingToRelocateTN ?? true,
+    willingToRelocateTN: ext.willingToRelocateTN ?? "",
     futureGoals: ext.futureGoals || "",
-    additionalRemarks: ext.customRemarks || row.additional_remarks || "",
+    additionalRemarks: ext.customRemarks || "",
 
     // H. Document Uploads (Resolved to streamable URLs, preserving S3 keys)
     studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
@@ -424,6 +433,7 @@ async function saveDraft(req, res) {
       result = await supabaseAdmin
         .from("applications")
         .update(updatePayload)
+        .eq("status", "draft")
         .eq("user_id", userId)
         .select()
         .single();
@@ -478,34 +488,32 @@ async function submitApplication(req, res) {
     const formData = await uploadAllApplicationDocuments(rawFormData);
     const dbPayload = mapFormDataToDb(formData);
 
-    const { data: existingApp } = await supabaseAdmin
+    const { data: existingApp, error: lookupError } = await supabaseAdmin
       .from("applications")
-      .select("id, application_number")
+      .select("id, application_number,status")
       .eq("user_id", userId)
       .maybeSingle();
 
+    if (lookupError) throw lookupError;
+    if (existingApp && existingApp.status !== "draft") return res.status(409).json({ success: false, message: "This application has already been submitted." });
     const appNumber =
       existingApp?.application_number && existingApp.application_number.startsWith("MF-2025-")
         ? existingApp.application_number
         : await generateNextApplicationNumber();
 
-    const { data: updated, error } = await supabaseAdmin
-      .from("applications")
-      .upsert(
-        {
-          user_id: userId,
-          application_number: appNumber,
-          ...dbPayload,
-          status: "submitted",
-          current_stage: "Stage 01",
-          stage_status: "In Progress",
-          submitted_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "user_id" }
-      )
-      .select()
-      .single();
+    const submission = {
+      user_id: userId,
+      application_number: appNumber,
+      ...dbPayload,
+      status: "submitted",
+      current_stage: "Stage 01",
+      stage_status: "In Progress",
+      submitted_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const table = supabaseAdmin.from("applications");
+    const query = existingApp ? table.update(submission).eq("id", existingApp.id).eq("status", "draft") : table.insert(submission);
+    const { data: updated, error } = await query.select().single();
 
     if (error) {
       console.error("Error submitting application:", error);
@@ -516,8 +524,11 @@ async function submitApplication(req, res) {
       });
     }
 
+    let adminNotified = false;
+    try { await EmailService.notifyAdmissions(updated); adminNotified = true; }
+    catch (mailError) { console.error("Admission saved; email delivery failed:", mailError.message); }
     return res.status(200).json({
-      success: true,
+      success: true, adminNotified,
       message: "Scholarship application submitted successfully!",
       applicationNumber: updated.application_number,
       data: mapDbToFormData(updated),
@@ -598,6 +609,7 @@ async function getStatus(req, res) {
 }
 
 module.exports = {
+  mapDbToFormData,
   getMyApplication,
   saveDraft,
   submitApplication,

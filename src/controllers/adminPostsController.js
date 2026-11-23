@@ -252,6 +252,7 @@ async function streamMedia(req, res) {
     if (Array.isArray(s3Key)) {
       s3Key = s3Key.join("/");
     }
+    if (typeof s3Key === "string" && s3Key.startsWith("scholar_marksheets/")) return res.sendStatus(403);
     if (!s3Key) {
       return res.status(400).send("Missing S3 Key");
     }

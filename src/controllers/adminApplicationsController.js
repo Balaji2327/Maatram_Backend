@@ -126,6 +126,11 @@ async function getAllApplications(req, res) {
       };
     });
 
+    if (req.user && !req.admin) {
+      const email = req.user.email?.toLowerCase();
+      filtered = filtered.filter(app => email && [app.tele_volunteer_email, app.physical_volunteer_email].some(value => value?.toLowerCase() === email));
+    }
+
     // Search query filter (Name, Email, Mobile, Application Number, District)
     if (search && search.trim()) {
       const s = search.trim().toLowerCase();
@@ -162,7 +167,7 @@ async function getAllApplications(req, res) {
 
     return res.status(200).json({
       success: true,
-      stats,
+      stats: req.admin ? stats : undefined,
       count: filtered.length,
       data: filtered,
     });
@@ -304,6 +309,34 @@ async function updateApplicationStatus(req, res) {
     } catch (eFind) {
       if (entersDirectInterview) throw eFind;
       console.warn("Could not fetch existing application:", eFind.message);
+    }
+
+    const phaseOf = value => [
+      ["submitted", "under_review"],
+      ["telephonic_done", "televerification_done", "physical_verification_in_progress"],
+      ["physical_verification_done", "home_visit_done", "video_interview_in_progress"],
+      ["video_interview_done", "shortlisted", "direct_interview_in_progress"],
+      ["direct_interview_done", "selected", "scholarship_awarded"]
+    ].findIndex(group => group.includes(value));
+    const from = phaseOf(existing?.status);
+    const to = phaseOf(status);
+    if (to > 0 && (from < 0 || to > from + 1)) {
+      return res.status(409).json({ success: false, message: "Complete the current verification stage before advancing." });
+    }
+    if (from === 1 && to === 2) {
+      let remarks = existing.additional_remarks || {};
+      if (typeof remarks === "string") {
+        try { remarks = JSON.parse(remarks); } catch { remarks = {}; }
+      }
+      const photos = storedPhotos(existing, remarks);
+      if (!photoSlots.every(slot => photoKey(photos[slot])) || !remarks.physical_volunteer_suggestion?.trim() || !remarks.physical_student_description?.trim()) {
+        return res.status(409).json({ success: false, message: "Complete the physical verification report and all five photos before advancing." });
+      }
+    }
+
+    if (["selected", "scholarship_awarded"].includes(status) &&
+        !["video_interview_done", "shortlisted", "direct_interview_in_progress", "direct_interview_done", "selected", "scholarship_awarded"].includes(existing?.status)) {
+      return res.status(409).json({ success: false, message: "Complete the final direct interview before approving admission." });
     }
 
     // Automatically synchronize current_stage and stage_status based on updated status across the 4 phases:
@@ -743,6 +776,7 @@ async function assignVolunteer(req, res) {
     const updatePayload = {};
 
     if (phase === "physical") {
+      if (!["televerification_done","telephonic_done","physical_verification_in_progress"].includes(existing?.status)) return res.status(409).json({ success: false, message: "Complete televerification before assigning a home visit." });
       additionalRemarks.physical_volunteer_name = name;
       if (email) additionalRemarks.physical_volunteer_email = email;
       if (phone) additionalRemarks.physical_volunteer_phone = phone;

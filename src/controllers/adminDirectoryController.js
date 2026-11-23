@@ -1,3 +1,5 @@
+const { buildProfile } = require("./scholarProfileController");
+const { memberRole } = require("../services/membershipService");
 const { supabaseAdmin } = require("../config/supabase");
 
 /**
@@ -7,48 +9,42 @@ const { supabaseAdmin } = require("../config/supabase");
  */
 async function getAllStudents(req, res) {
   try {
-    const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 100 });
-    if (authErr) {
-      throw authErr;
+    const users = [];
+    for (let page = 1; ; page++) {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+      if (error) throw error;
+      users.push(...data.users);
+      if (data.users.length < 200) break;
     }
 
     const { data: applications, error: appErr } = await supabaseAdmin.from("applications").select("*");
 
+    if (appErr) throw appErr;
     const appMap = new Map();
     (applications || []).forEach((app) => {
-      if (app.email) appMap.set(app.email.toLowerCase(), app);
       if (app.user_id) appMap.set(app.user_id, app);
     });
 
     const studentUsers = (users || []).filter(
-      (u) => u.user_metadata?.role === "student" || u.email?.includes("student")
+      (u) => memberRole(appMap.get(u.id), u.app_metadata?.role) === "student"
     );
 
     const students = studentUsers.map((u) => {
       const meta = u.user_metadata || {};
-      const app = appMap.get(u.email?.toLowerCase()) || appMap.get(u.id) || {};
+      const app = appMap.get(u.id);
+      const profile = buildProfile({ user: u, app }).values;
 
       return {
         id: u.id,
         user_id: u.id,
         email: u.email,
-        full_name: meta.full_name || meta.name || app.full_name || "Scholar",
-        roll_number: meta.roll_number || app.application_number || "MF-SCH-2024",
-        phone: meta.phone || app.mobile_number || "",
-        dob: meta.dob || app.dob || "",
-        gender: meta.gender || app.gender || "",
-        blood_group: meta.blood_group || app.blood_group || "",
-        district: meta.district || app.district || "Tamil Nadu",
-        college: meta.college_name || app.college_name || "Engineering College",
-        degree: meta.degree_branch || app.degree_branch || app.preferred_branch || "Engineering",
-        year: meta.current_year || "Active Scholar",
-        cgpa: meta.cgpa || "8.5+",
-        status: app.status || "selected",
-        current_stage: app.current_stage || "admitted",
-        created_at: u.created_at,
+        full_name: profile.fullName, roll_number: profile.rollNumber || profile.applicationNumber,
+        phone: profile.mobileNumber, dob: profile.dob, gender: profile.gender, blood_group: profile.bloodGroup,
+        district: profile.district, college: profile.collegeName, degree: profile.degreeBranch,
+        year: profile.currentYear, cgpa: profile.cgpa, status: app?.status || "admitted",
+        current_stage: app?.current_stage || "admitted", created_at: u.created_at,
         academic_records: meta.academic_records || [],
         academic_updated_at: meta.updated_academic_at || null,
-        metadata: meta,
       };
     });
 
@@ -79,8 +75,11 @@ async function getAllAlumni(req, res) {
       throw authErr;
     }
 
+    const { data: rows, error } = await supabaseAdmin.from("applications").select("user_id,status,current_stage,application_number");
+    if (error) throw error;
+    const memberApps = new Map(rows.map(row => [row.user_id, row]));
     const alumniUsers = (users || []).filter(
-      (u) => u.user_metadata?.role === "alumni" || u.email?.includes("alumni")
+      (u) => memberRole(memberApps.get(u.id), u.app_metadata?.role) === "alumni"
     );
 
     const alumni = alumniUsers.map((u) => {
@@ -128,17 +127,18 @@ async function getAllAlumni(req, res) {
  * @route       GET /admin/students/:email/academics
  * @desc        Fetch student 8-semester academic records from Supabase
  */
+async function findByEmail(email) {
+  for (let page = 1; ; page++) {
+    const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error) throw error;
+    const user = data.users.find(item => item.email?.toLowerCase() === email?.toLowerCase());
+    if (user || data.users.length < 200) return user;
+  }
+}
+
 async function getStudentAcademicRecords(req, res) {
   try {
-    const emailParam = (req.params.email || "").toLowerCase().trim();
-    if (!emailParam) {
-      return res.status(400).json({ success: false, message: "Student email is required" });
-    }
-
-    const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 200 });
-    if (authErr) throw authErr;
-
-    const user = (users || []).find((u) => u.email?.toLowerCase().trim() === emailParam);
+    const user = req.scholar?.user || await findByEmail(req.params.email);
     if (!user) {
       return res.status(200).json({
         success: true,
@@ -169,30 +169,16 @@ async function getStudentAcademicRecords(req, res) {
  */
 async function saveStudentAcademicRecords(req, res) {
   try {
-    const emailParam = (req.params.email || "").toLowerCase().trim();
     const { records, cgpa } = req.body;
-
-    if (!emailParam) {
-      return res.status(400).json({ success: false, message: "Student email is required" });
-    }
-
-    if (!Array.isArray(records)) {
-      return res.status(400).json({ success: false, message: "Records must be an array" });
-    }
-
-    const { data: { users }, error: authErr } = await supabaseAdmin.auth.admin.listUsers({ perPage: 200 });
-    if (authErr) throw authErr;
-
-    const user = (users || []).find((u) => u.email?.toLowerCase().trim() === emailParam);
+    if (!Array.isArray(records)) return res.status(400).json({ success: false, message: "Invalid academic records." });
+    const user = req.scholar?.user || await findByEmail(req.params.email);
     if (!user) {
-      return res.status(404).json({ success: false, message: "Student user not found with email: " + emailParam });
+      return res.status(404).json({ success: false, message: "Student account not found." });
     }
 
-    const currentMetadata = user.user_metadata || {};
     const updatedMetadata = {
-      ...currentMetadata,
       academic_records: records,
-      ...(cgpa ? { cgpa } : {}),
+      ...(cgpa !== undefined ? { cgpa } : {}),
       updated_academic_at: new Date().toISOString(),
     };
 

@@ -2,6 +2,8 @@ const { supabase, supabaseAdmin } = require("../config/supabase");
 const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
 const { TwoFactorService } = require("../services/twoFactorService");
 const { EmailService } = require("../services/emailService");
+const { getMemberRole } = require("../services/membershipService");
+const { ApplicationModel } = require("../models/Application");
 const { JwtService } = require("../services/jwtService");
 
 // Helper to format Indian phone numbers to E.164 format (+91XXXXXXXXXX)
@@ -333,7 +335,7 @@ async function verifyOtp(req, res) {
       email: user.email,
       role: user.user_metadata?.role || "applicant",
       phone: user.phone || user.user_metadata?.phone,
-      user_metadata: user.user_metadata,
+      user_metadata: { full_name: user.user_metadata?.full_name, role: user.user_metadata?.role },
       type: "user",
     });
 
@@ -471,9 +473,23 @@ async function signup(req, res) {
  * @desc        Authenticate student using Email and Password (No OTP required)
  */
 async function login(req, res) {
+  return passwordLogin(req, res, false);
+}
+
+async function memberLogin(req, res) {
+  return passwordLogin(req, res, true);
+}
+
+async function passwordLogin(req, res, membersOnly) {
   try {
     const { identifier, email, password, otp } = req.body;
-    const inputEmail = (email || identifier || "").trim().toLowerCase();
+    let inputEmail = (email || identifier || "").trim().toLowerCase();
+    if (membersOnly && /^mf-[a-z0-9-]+$/i.test(inputEmail)) {
+      const app = await ApplicationModel.findById(inputEmail.toUpperCase());
+      const owner = app?.user_id && await supabaseAdmin.auth.admin.getUserById(app.user_id);
+      inputEmail = owner?.data?.user?.email || "";
+      if (!inputEmail) return res.status(401).json({ success: false, message: "Invalid credentials." });
+    }
 
     if (!inputEmail) {
       return res.status(400).json({
@@ -506,6 +522,9 @@ async function login(req, res) {
 
     const { session, user } = data;
 
+    const role = membersOnly ? await getMemberRole(user) : null;
+    if (membersOnly && !role) return res.status(403).json({ success: false, message: "Main portal access opens after final admission approval. Track your status in the applicant portal." });
+
     // Check if 2FA (Authenticator App) is enabled for this student/alumni
     const is2FAEnabled = Boolean(user?.user_metadata?.two_factor_enabled);
     if (is2FAEnabled) {
@@ -534,7 +553,7 @@ async function login(req, res) {
       email: user.email,
       role: user.user_metadata?.role || "applicant",
       phone: user.phone || user.user_metadata?.phone,
-      user_metadata: user.user_metadata,
+      user_metadata: { full_name: user.user_metadata?.full_name, role: user.user_metadata?.role },
       type: "user",
     });
 
@@ -552,6 +571,7 @@ async function login(req, res) {
     return res.status(200).json({
       success: true,
       message: "Login successful!",
+      memberRole: role,
       token: jwtToken,
       expiresIn: "7h",
       session: enhancedSession,
@@ -1033,6 +1053,7 @@ async function getMe(req, res) {
 
 module.exports = {
   signup,
+  memberLogin,
   login,
   sendOtp,
   verifyOtp,
