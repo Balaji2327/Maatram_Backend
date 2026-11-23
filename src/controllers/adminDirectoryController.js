@@ -1,5 +1,6 @@
 const { buildProfile } = require("./scholarProfileController");
 const { memberRole } = require("../services/membershipService");
+const { admissionStatus } = require("../models/Application");
 const { supabaseAdmin } = require("../config/supabase");
 
 /**
@@ -41,7 +42,7 @@ async function getAllStudents(req, res) {
         full_name: profile.fullName, roll_number: profile.rollNumber || profile.applicationNumber,
         phone: profile.mobileNumber, dob: profile.dob, gender: profile.gender, blood_group: profile.bloodGroup,
         district: profile.district, college: profile.collegeName, degree: profile.degreeBranch,
-        year: profile.currentYear, cgpa: profile.cgpa, status: app?.status || "admitted",
+        year: profile.currentYear, cgpa: profile.cgpa, status: admissionStatus(app?.status) || "admitted",
         current_stage: app?.current_stage || "admitted", created_at: u.created_at,
         academic_records: meta.academic_records || [],
         academic_updated_at: meta.updated_academic_at || null,

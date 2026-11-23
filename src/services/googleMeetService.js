@@ -98,8 +98,8 @@ class GoogleMeetService {
         const requestId = `maatram-meet-${applicationNumber || "app"}-${Date.now()}`.replace(/[^a-zA-Z0-9_-]/g, "_");
 
         const eventData = {
-          summary: `Maatram Scholarship Interview - ${studentName || "Applicant"} (${applicationNumber || "MF-2025"})`,
-          description: `Phase 3 Video Call Panel Interview for Maatram Educational & Charitable Trust 100% Free Higher Education Scholarship Program.\n\nApplicant: ${studentName}\nApplication No: ${applicationNumber}`,
+          summary: `Maatram Admission Interview - ${studentName || "Applicant"} (${applicationNumber || "MF-2025"})`,
+          description: `Phase 3 Video Call Panel Interview for Maatram Educational & Charitable Trust 100% Free Higher Education Program.\n\nApplicant: ${studentName}\nApplication No: ${applicationNumber}`,
           start: {
             dateTime: startTime.toISOString(),
             timeZone: "Asia/Kolkata",

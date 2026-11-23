@@ -1,4 +1,4 @@
-const { ApplicationModel } = require("../models/Application");
+const { ApplicationModel, admissionStatus } = require("../models/Application");
 const { StorageService } = require("../services/storageService");
 const { EmailService } = require("../services/emailService");
 const { GoogleMeetService } = require("../services/googleMeetService");
@@ -88,6 +88,7 @@ async function getAllApplications(req, res) {
       return {
         ...app,
         ...ext,
+        whyNeedSupport: ext.whyNeedSupport || app.whyNeedSupport || ext.why_scholarship || app.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || app.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
         volunteer_name: ext.volunteer_name || app.volunteer_name || ext.tele_volunteer_name || "",
         tele_volunteer_name: ext.tele_volunteer_name || ext.volunteer_name || app.volunteer_name || "",
@@ -159,7 +160,7 @@ async function getAllApplications(req, res) {
             .length
         : 0,
       selected: applications
-        ? applications.filter((a) => a.status === "selected" || a.status === "scholarship_awarded")
+        ? applications.filter((a) => a.status === "selected")
             .length
         : 0,
       rejected: applications ? applications.filter((a) => a.status === "rejected").length : 0,
@@ -216,6 +217,7 @@ async function getApplicationById(req, res) {
       data: {
         ...application,
         ...ext,
+        whyNeedSupport: ext.whyNeedSupport || application.whyNeedSupport || ext.why_scholarship || application.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || application.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
         volunteer_name: ext.volunteer_name || application.volunteer_name || ext.tele_volunteer_name || "",
         tele_volunteer_name: ext.tele_volunteer_name || ext.volunteer_name || application.volunteer_name || "",
@@ -271,7 +273,8 @@ async function getApplicationById(req, res) {
 async function updateApplicationStatus(req, res) {
   try {
     const { id } = req.params;
-    const { status, reason, email: directEmail, name: directName, rejectionStage: directRejectionStage } = req.body;
+    const status = admissionStatus(req.body.status);
+    const { reason, email: directEmail, name: directName, rejectionStage: directRejectionStage } = req.body;
 
     const allowedStatuses = [
       "draft",
@@ -288,7 +291,6 @@ async function updateApplicationStatus(req, res) {
       "direct_interview_in_progress",
       "direct_interview_done",
       "selected",
-      "scholarship_awarded",
       "rejected",
     ];
 
@@ -316,7 +318,7 @@ async function updateApplicationStatus(req, res) {
       ["telephonic_done", "televerification_done", "physical_verification_in_progress"],
       ["physical_verification_done", "home_visit_done", "video_interview_in_progress"],
       ["video_interview_done", "shortlisted", "direct_interview_in_progress"],
-      ["direct_interview_done", "selected", "scholarship_awarded"]
+      ["direct_interview_done", "selected"]
     ].findIndex(group => group.includes(value));
     const from = phaseOf(existing?.status);
     const to = phaseOf(status);
@@ -334,8 +336,8 @@ async function updateApplicationStatus(req, res) {
       }
     }
 
-    if (["selected", "scholarship_awarded"].includes(status) &&
-        !["video_interview_done", "shortlisted", "direct_interview_in_progress", "direct_interview_done", "selected", "scholarship_awarded"].includes(existing?.status)) {
+    if (status === "selected" &&
+        !["video_interview_done", "shortlisted", "direct_interview_in_progress", "direct_interview_done", "selected"].includes(existing?.status)) {
       return res.status(409).json({ success: false, message: "Complete the final direct interview before approving admission." });
     }
 
@@ -376,9 +378,9 @@ async function updateApplicationStatus(req, res) {
     } else if (status === "direct_interview_done") {
       current_stage = "Final Selection";
       stage_status = "Direct Interview Cleared";
-    } else if (status === "selected" || status === "scholarship_awarded") {
+    } else if (status === "selected") {
       current_stage = "Final Selection";
-      stage_status = "Scholarship Awarded";
+      stage_status = "Admission Confirmed";
     } else if (status === "rejected") {
       current_stage = "Closed";
       stage_status = "Rejected";

@@ -1,3 +1,4 @@
+const { admissionRecord } = require("../models/Application");
 const { supabaseAdmin } = require("../config/supabase");
 const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
 const { EmailService } = require("../services/emailService");
@@ -176,7 +177,8 @@ function mapFormDataToDb(formData) {
 }
 
 // Helper to map snake_case DB columns to camelCase frontend fields
-function mapDbToFormData(row) {
+function mapDbToFormData(record) {
+  const row = admissionRecord(record);
   if (!row) return null;
 
   // Attempt to parse extended data stored in additional_remarks
@@ -478,7 +480,7 @@ async function saveDraft(req, res) {
 /**
  * @controller  submitApplication
  * @route       POST /api/application/submit
- * @desc        Final submit of scholarship application into Supabase database
+ * @desc        Final submit of admission application into Supabase database
  */
 async function submitApplication(req, res) {
   try {
@@ -529,7 +531,7 @@ async function submitApplication(req, res) {
     catch (mailError) { console.error("Admission saved; email delivery failed:", mailError.message); }
     return res.status(200).json({
       success: true, adminNotified,
-      message: "Scholarship application submitted successfully!",
+      message: "Admission application submitted successfully!",
       applicationNumber: updated.application_number,
       data: mapDbToFormData(updated),
     });
@@ -552,11 +554,12 @@ async function getStatus(req, res) {
   try {
     const userId = req.user.id;
 
-    const { data: app } = await supabaseAdmin
+    const { data: record } = await supabaseAdmin
       .from("applications")
       .select("application_number, status, current_stage, stage_status, submitted_at, additional_remarks")
       .eq("user_id", userId)
       .maybeSingle();
+    const app = admissionRecord(record);
 
     let rejectionReason = "";
     let rejectionStage = 1;

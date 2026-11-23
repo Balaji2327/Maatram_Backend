@@ -63,7 +63,7 @@ class EmailService {
     await transporter.sendMail({
       from: process.env.FROM_EMAIL || "info@maatram.tech", to,
       subject: `Application submitted: ${app.application_number}`,
-      text: [`New scholarship application from ${app.full_name}.`, `Application number: ${app.application_number}`,
+      text: [`New admission application from ${app.full_name}.`, `Application number: ${app.application_number}`,
         `Preferred degree: ${app.preferred_degree || "Unspecified"}`, `Review submitted form: ${link.href}`].join("\n"),
     });
   }
@@ -140,12 +140,12 @@ class EmailService {
     const fromEmail = process.env.FROM_EMAIL || "info@maatram.tech";
     const fromName = process.env.FROM_NAME || "Maatram Foundation";
 
-    const emailSubject = `🔐 Your Maatram Account Password Reset Code: ${otpCode}`;
+    const emailSubject = `Your Maatram Account Password Reset Code: ${otpCode}`;
     const htmlContent = `
       <div style="font-family: Arial, sans-serif; max-width: 540px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
         <div style="text-align: center; margin-bottom: 20px;">
           <h2 style="color: #0f172a; margin: 0; font-size: 20px;">Maatram Foundation</h2>
-          <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;">Password Reset Request</p>
+          <p style="color: #64748b; font-size: 13px; margin: 4px 0 0 0;"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true" style="vertical-align:middle"><path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"/></svg> Password Reset Request</p>
         </div>
 
         <p style="color: #334155; font-size: 14px; line-height: 1.6;">

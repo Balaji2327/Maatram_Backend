@@ -1,5 +1,17 @@
 const { supabaseAdmin } = require("../config/supabase");
 
+const legacySelectedStatus = "scholarship_awarded";
+
+function admissionStatus(status) {
+  return status === legacySelectedStatus ? "selected" : status;
+}
+
+function admissionRecord(row) {
+  if (!row) return row;
+  const status = admissionStatus(row.status);
+  return status === "selected" ? { ...row, status, stage_status: "Admission Confirmed" } : row;
+}
+
 class ApplicationModel {
   static async findByUserId(userId) {
     const { data, error } = await supabaseAdmin
@@ -9,7 +21,7 @@ class ApplicationModel {
       .maybeSingle();
 
     if (error) throw new Error(error.message);
-    return data;
+    return admissionRecord(data);
   }
 
   static isUUID(str) {
@@ -28,7 +40,7 @@ class ApplicationModel {
     const { data, error } = await query.maybeSingle();
 
     if (error) throw new Error(error.message);
-    return data;
+    return admissionRecord(data);
   }
 
   static async getAll({ status, district } = {}) {
@@ -38,7 +50,9 @@ class ApplicationModel {
       .order("created_at", { ascending: false });
 
     if (status && status !== "all") {
-      query = query.eq("status", status);
+      query = admissionStatus(status) === "selected"
+        ? query.in("status", ["selected", legacySelectedStatus])
+        : query.eq("status", status);
     }
 
     if (district && district !== "all") {
@@ -47,7 +61,7 @@ class ApplicationModel {
 
     const { data, error } = await query;
     if (error) throw new Error(error.message);
-    return data || [];
+    return (data || []).map(admissionRecord);
   }
 
   static async create(payload) {
@@ -58,7 +72,7 @@ class ApplicationModel {
       .single();
 
     if (error) throw new Error(error.message);
-    return data;
+    return admissionRecord(data);
   }
 
   static async update(id, updates, expectedUpdatedAt) {
@@ -167,7 +181,7 @@ class ApplicationModel {
     const { data, error } = await query.select().maybeSingle();
 
     if (error) throw new Error(error.message);
-    return data;
+    return admissionRecord(data);
   }
 
   static async upsertByUser(userId, payload) {
@@ -185,7 +199,7 @@ class ApplicationModel {
       .single();
 
     if (error) throw new Error(error.message);
-    return data;
+    return admissionRecord(data);
   }
 
   static async delete(id) {
@@ -196,5 +210,7 @@ class ApplicationModel {
 }
 
 module.exports = {
+  admissionStatus,
+  admissionRecord,
   ApplicationModel,
 };
