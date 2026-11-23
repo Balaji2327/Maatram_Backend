@@ -1,40 +1,6 @@
 const { supabaseAdmin } = require("../config/supabase");
 
 class VolunteerModel {
-  static async getAll() {
-    try {
-      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 100 });
-      if (error) throw error;
-      const volunteers = [];
-      for (const u of data.users || []) {
-        if (u.user_metadata?.is_volunteer && u.user_metadata?.volunteer_data) {
-          volunteers.push(u.user_metadata.volunteer_data);
-        }
-      }
-      return volunteers;
-    } catch (err) {
-      console.error("VolunteerModel.getAll error:", err.message);
-      return [];
-    }
-  }
-
-  static async getByEmail(email) {
-    if (!email) return null;
-    const cleanEmail = email.trim().toLowerCase();
-    try {
-      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 100 });
-      if (error) throw error;
-      const user = (data.users || []).find((u) => u.email?.toLowerCase() === cleanEmail);
-      if (user && user.user_metadata?.is_volunteer) {
-        return user.user_metadata.volunteer_data || null;
-      }
-      return null;
-    } catch (err) {
-      console.error("VolunteerModel.getByEmail error:", err.message);
-      return null;
-    }
-  }
-
   static async register(volunteerData) {
     const cleanEmail = (volunteerData.email || "").trim().toLowerCase();
     if (!cleanEmail) {
@@ -116,50 +82,38 @@ class VolunteerModel {
   }
 
   static async getAll() {
-    const volunteersMap = new Map();
-
-    // 1. Fetch from Supabase posts table
-    try {
-      const { data: records, error } = await supabaseAdmin
-        .from("posts")
-        .select("content, location")
-        .eq("category", "__SYSTEM_VOLUNTEER__");
-
-      if (!error && records) {
-        for (const r of records) {
-          try {
-            const parsed = JSON.parse(r.content);
-            if (parsed && parsed.email) {
-              volunteersMap.set(parsed.email.toLowerCase(), parsed);
-            }
-          } catch {
-            // ignore JSON parse error
-          }
+    const volunteers = new Map();
+    const pageSize = 100;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await supabaseAdmin.from("posts")
+        .select("id, content, location").eq("category", "__SYSTEM_VOLUNTEER__")
+        .order("id").range(offset, offset + pageSize - 1);
+      if (error) throw error;
+      for (const row of data) {
+        const email = row.location?.trim().toLowerCase();
+        if (!email) continue;
+        try {
+          volunteers.set(email, { ...JSON.parse(row.content), email });
+        } catch {
+          volunteers.set(email, { email });
         }
       }
-    } catch (err) {
-      console.warn("VolunteerModel.getAll db warning:", err.message);
+      if (data.length < pageSize) break;
     }
 
-    // 2. Supplement from Supabase Auth user_metadata
-    try {
-      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ perPage: 100 });
-      if (!error && data?.users) {
-        for (const u of data.users) {
-          if (u.user_metadata?.is_volunteer && u.user_metadata?.volunteer_data) {
-            const vData = u.user_metadata.volunteer_data;
-            const emailKey = (vData.email || u.email || "").toLowerCase();
-            if (emailKey && !volunteersMap.has(emailKey)) {
-              volunteersMap.set(emailKey, vData);
-            }
-          }
+    for (let page = 1; ; page++) {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: pageSize });
+      if (error) throw error;
+      for (const user of data.users) {
+        const email = user.email?.trim().toLowerCase();
+        if (email && user.user_metadata?.is_volunteer === true &&
+            user.user_metadata.volunteer_data && !volunteers.has(email)) {
+          volunteers.set(email, { ...user.user_metadata.volunteer_data, email });
         }
       }
-    } catch (err) {
-      console.warn("VolunteerModel.getAll auth warning:", err.message);
+      if (data.users.length < pageSize) break;
     }
-
-    return Array.from(volunteersMap.values());
+    return Array.from(volunteers.values());
   }
 
   static async getByEmail(email) {

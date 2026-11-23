@@ -4,6 +4,55 @@ const nodemailer = require("nodemailer");
  * Service to dispatch email notifications using Resend SMTP or configured SMTP
  */
 class EmailService {
+  static async sendPostNotification(post) {
+    const { supabaseAdmin } = require("../config/supabase");
+    const { memberRole } = require("./membershipService");
+    const transporter = this.getTransporter();
+    if (!transporter) throw new Error("SMTP is not configured.");
+    const addresses = new Set();
+    const add = email => {
+      const address = email?.trim().toLowerCase();
+      if (address) addresses.add(address);
+    };
+    const size = 100;
+    for (let page = 1; ; page++) {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: size });
+      if (error) throw error;
+      if (!data.users.length) break;
+      const apps = await supabaseAdmin.from("applications")
+        .select("user_id,status,current_stage,application_number").in("user_id", data.users.map(u => u.id));
+      if (apps.error) throw apps.error;
+      const byUser = new Map(apps.data.map(app => [app.user_id, app]));
+      for (const user of data.users) {
+        if (memberRole(byUser.get(user.id), user.app_metadata?.role)) add(user.email);
+      }
+      if (data.users.length < size) break;
+    }
+    for (let offset = 0; ; offset += size) {
+      const { data, error } = await supabaseAdmin.from("administrators")
+        .select("email").order("id").range(offset, offset + size - 1);
+      if (error) throw error;
+      data.forEach(admin => add(admin.email));
+      if (data.length < size) break;
+    }
+    let sent = 0;
+    for (const email of addresses) {
+      if (!/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(email)) continue;
+      try {
+        const result = await transporter.sendMail({
+          from: process.env.FROM_EMAIL || "info@maatram.tech",
+          to: { name: "", address: email },
+          subject: post.title,
+          text: post.content,
+        });
+        if (result.accepted?.length) sent++;
+      } catch (err) {
+        console.warn("Post email failed:", err.message);
+      }
+    }
+    return { sent, failed: addresses.size - sent };
+  }
+
   static async notifyAdmissions(app) {
     const transporter = this.getTransporter();
     const to = process.env.ADMIN_EMAIL;
@@ -47,96 +96,36 @@ class EmailService {
    * @param {Array} volunteers - List of volunteer records
    */
   static async sendEventNotificationToVolunteers(event, volunteers = []) {
-    if (!volunteers || volunteers.length === 0) {
-      console.log("ℹ️ No registered volunteers found to notify for event:", event.title);
-      return { success: true, count: 0, message: "No registered volunteers to notify" };
-    }
-
-    const fromEmail = process.env.FROM_EMAIL || "info@maatram.tech";
-    const fromName = process.env.FROM_NAME || "Maatram Foundation";
-    const isRemote = event.mode === "remote";
-
-    const emailSubject = `📢 New Volunteer Opportunity: ${event.title} (${isRemote ? "Remote" : "Offline"})`;
-    
-    const eligibleYearsText = Array.isArray(event.eligible_years) && event.eligible_years.length > 0
-      ? event.eligible_years.map(y => `Year ${y}`).join(", ")
-      : "All Years (1, 2, 3, 4)";
-
-    const quotaInfo = `
-      Student Volunteers Needed: ${event.student_volunteers_needed || 0}
-      Alumni Volunteers Needed: ${event.alumni_volunteers_needed || 0}
-      Selection: First-Come, First-Served basis
-    `;
-
-    const scheduleInfo = isRemote
-      ? `Duration to Complete: ${event.duration || "Self-paced"}`
-      : `Date: ${event.event_date || "TBD"} | Time: ${event.start_time || "TBD"} - ${event.end_time || "TBD"} | Location: ${event.location || "Venue"}`;
-
-    const htmlContent = `
-      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 16px;">
-        <div style="text-align: center; margin-bottom: 24px;">
-          <h2 style="color: #0f172a; margin: 0 0 6px;">Maatram Foundation</h2>
-          <span style="display: inline-block; background-color: #FEF3C7; color: #92400E; font-size: 12px; font-weight: bold; padding: 4px 12px; border-radius: 9999px;">
-            Volunteer Drive Alert
-          </span>
-        </div>
-
-        <h3 style="color: #1e293b; margin-top: 0;">${event.title}</h3>
-        <p style="color: #475569; font-size: 14px; line-height: 1.6;">${event.description || "You have a new volunteer event posted by the foundation."}</p>
-
-        <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 16px; margin: 20px 0; font-size: 13px; color: #334155;">
-          <p style="margin: 4px 0;"><strong>Format:</strong> ${isRemote ? "Remote / Online" : "Offline / On-premise"}</p>
-          <p style="margin: 4px 0;"><strong>Task to Complete:</strong> ${event.task_to_complete || "General Volunteering"}</p>
-          <p style="margin: 4px 0;"><strong>${isRemote ? "Duration" : "Schedule"}:</strong> ${scheduleInfo}</p>
-          <p style="margin: 4px 0;"><strong>Eligible Student Years:</strong> ${eligibleYearsText}</p>
-          <div style="margin-top: 8px; padding-top: 8px; border-top: 1px dashed #cbd5e1;">
-            <p style="margin: 4px 0;"><strong>Required Volunteers:</strong> ${event.student_volunteers_needed || 0} Students &bull; ${event.alumni_volunteers_needed || 0} Alumni</p>
-            <p style="margin: 4px 0; color: #d97706; font-weight: bold;">Note: First-come, first-served registration. First to accept will participate.</p>
-          </div>
-        </div>
-
-        <p style="font-size: 13px; color: #64748b;">
-          Please log in to your Student or Alumni portal to Accept or Reject this event.
-        </p>
-
-        <div style="text-align: center; margin-top: 24px;">
-          <a href="http://localhost:3000/student/events" style="background-color: #F7BC0F; color: #0f172a; text-decoration: none; font-weight: bold; font-size: 14px; padding: 12px 24px; border-radius: 10px; display: inline-block;">
-            View & Accept Event
-          </a>
-        </div>
-      </div>
-    `;
-
-    const transporter = EmailService.getTransporter();
     let sentCount = 0;
-    const errors = [];
-
-    for (const volunteer of volunteers) {
-      if (!volunteer.email) continue;
-      try {
-        if (transporter) {
-          await transporter.sendMail({
-            from: `"${fromName}" <${fromEmail}>`,
-            to: volunteer.email,
-            subject: emailSubject,
-            text: `${event.title}\n${event.description}\n${scheduleInfo}\n${quotaInfo}`,
-            html: htmlContent,
+    if (volunteers.length) {
+      const transporter = this.getTransporter();
+      if (!transporter) throw new Error("Event email is not configured.");
+      const remote = event.mode === "remote";
+      const details = [
+        event.title, event.description, remote ? "Remote event" : "Offline event",
+        remote ? `Duration: ${event.duration}` : `Date: ${event.event_date} | Time: ${event.event_time || "TBD"} | Location: ${event.location}`,
+        `Task: ${event.task_to_complete || "General volunteering"}`,
+        `Student volunteers needed: ${event.student_volunteers_needed}`,
+        `Alumni volunteers needed: ${event.alumni_volunteers_needed}`,
+        `Eligible student years: ${event.eligible_years.join(", ")}`,
+        "Sign in to your Student or Alumni portal to respond.",
+      ].filter(Boolean).join("\n");
+      for (const { email } of volunteers) {
+        if (!/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(email)) continue;
+        try {
+          const result = await transporter.sendMail({
+            from: { name: process.env.FROM_NAME || "Maatram Foundation", address: process.env.FROM_EMAIL || "info@maatram.tech" },
+            to: { address: email, name: "" },
+            subject: `Volunteer event: ${event.title}`,
+            text: details,
           });
+          if (result.accepted?.length) sentCount++;
+        } catch (err) {
+          console.warn("Event notification failed:", err.message);
         }
-        sentCount++;
-      } catch (err) {
-        console.error(`Failed to send event notification to ${volunteer.email}:`, err.message);
-        errors.push({ email: volunteer.email, error: err.message });
       }
     }
-
-    console.log(`✅ Broadcast complete: Sent event notification email to ${sentCount}/${volunteers.length} registered volunteers.`);
-    return {
-      success: true,
-      sentCount,
-      totalVolunteers: volunteers.length,
-      errors: errors.length > 0 ? errors : undefined,
-    };
+    return { sentCount, failedCount: volunteers.length - sentCount };
   }
 
   /**

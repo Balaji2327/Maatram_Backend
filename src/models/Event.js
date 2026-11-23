@@ -137,14 +137,7 @@ class EventModel {
       .select()
       .single();
 
-    if (error) {
-      console.error("EventModel.create error from Supabase:", error.message);
-      return enrichEvent({
-        id: `ev-${Date.now()}`,
-        ...insertPayload,
-        created_at: new Date().toISOString(),
-      });
-    }
+    if (error) throw error;
 
     return enrichEvent(data);
   }
@@ -191,11 +184,8 @@ class EventModel {
       .select()
       .single();
 
-    if (error) {
-      console.error("EventModel.update error:", error.message);
-    }
-
-    return enrichEvent(data || { id, ...updates });
+    if (error) throw error;
+    return enrichEvent(data);
   }
 
   static async delete(id) {

@@ -5,11 +5,12 @@ class PostModel {
     const { data, error } = await supabaseAdmin
       .from("posts")
       .select("*")
+      .or("category.is.null,category.neq.__SYSTEM_VOLUNTEER__")
       .order("created_at", { ascending: false });
 
     if (error) {
       console.error("PostModel.getAll error:", error.message);
-      return [];
+      throw error;
     }
     return data || [];
   }

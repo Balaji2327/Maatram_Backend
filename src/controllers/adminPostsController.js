@@ -1,6 +1,35 @@
 const { PostModel } = require("../models/Post");
 const { StorageService } = require("../services/storageService");
 
+const { randomUUID } = require("crypto");
+const { PutObjectCommand } = require("@aws-sdk/client-s3");
+const { s3Client, AWS_S3_BUCKET } = require("../services/storageService");
+const { EmailService } = require("../services/emailService");
+
+async function uploadPostMedia(req, res) {
+  const type = req.get("Content-Type")?.split(";")[0];
+  if (!Buffer.isBuffer(req.body) || !req.body.length) {
+    return res.status(415).json({ success: false, message: "Select a supported image or video." });
+  }
+  const folder = type.startsWith("video/") ? "posts/videos" : "posts";
+  const key = `${folder}/${randomUUID()}.${type.split("/")[1]}`;
+  await s3Client.send(new PutObjectCommand({
+    Bucket: AWS_S3_BUCKET, Key: key, ContentType: type, Body: req.body,
+  }));
+  return res.json({ success: true, data: { key } });
+}
+
+async function postNotice(post, enabled) {
+  if (!enabled) return "Post saved. Email is off.";
+  try {
+    const { sent, failed } = await EmailService.sendPostNotification(post);
+    return `Post saved. Email accepted for ${sent} recipient(s). Failed: ${failed}.`;
+  } catch (err) {
+    console.error("Post notification failed:", err.message);
+    return "Post saved. Email notification failed. Check the server logs.";
+  }
+}
+
 /**
  * @controller  getAllPosts
  * @route       GET /admin/posts
@@ -105,7 +134,7 @@ async function createPost(req, res) {
 
     return res.status(201).json({
       success: true,
-      message: "Post created and S3 keys stored in database successfully.",
+      message: await postNotice(postRecord, req.body.sendEmailNotification !== false),
       data: postRecord,
     });
   } catch (err) {
@@ -184,7 +213,7 @@ async function updatePost(req, res) {
 
     return res.status(200).json({
       success: true,
-      message: "Post updated with S3 keys successfully",
+      message: await postNotice(updated, req.body.sendEmailNotification === true),
       data: updated,
     });
   } catch (err) {
@@ -260,13 +289,19 @@ async function streamMedia(req, res) {
     const { GetObjectCommand } = require("@aws-sdk/client-s3");
     const { s3Client, AWS_S3_BUCKET } = require("../services/storageService");
 
+    const range = s3Key.startsWith("posts/videos/") ? req.get("Range") : undefined;
     const command = new GetObjectCommand({
+      Range: range,
       Bucket: AWS_S3_BUCKET,
       Key: s3Key,
     });
 
     const s3Object = await s3Client.send(command);
 
+    if (s3Key.startsWith("posts/videos/")) res.setHeader("Accept-Ranges", "bytes");
+    if (s3Object.ContentRange) {
+      res.status(206).setHeader("Content-Range", s3Object.ContentRange);
+    }
     if (s3Object.ContentType) {
       res.setHeader("Content-Type", s3Object.ContentType);
     }
@@ -278,6 +313,7 @@ async function streamMedia(req, res) {
     s3Object.Body.pipe(res);
   } catch (err) {
     console.error("streamMedia error:", err.message);
+    if (err.$metadata?.httpStatusCode === 416) return res.sendStatus(416);
     if (err.name === "NoSuchKey" || err.$metadata?.httpStatusCode === 404) {
       return res.status(404).send("Media not found");
     }
@@ -286,6 +322,7 @@ async function streamMedia(req, res) {
 }
 
 module.exports = {
+  uploadPostMedia,
   getAllPosts,
   createPost,
   updatePost,

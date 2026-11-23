@@ -3,6 +3,26 @@ const { VolunteerModel } = require("../models/Volunteer");
 const { EmailService } = require("../services/emailService");
 const { StorageService } = require("../services/storageService");
 
+async function volunteerNotice(body, event) {
+  const toggle = body.sendEmailNotification ?? body.send_email_notification;
+  if (toggle !== true && toggle !== "true") {
+    return { message: "Volunteer email is off.", emailBroadcast: { dispatched: false, sentCount: 0 } };
+  }
+  try {
+    const volunteers = await VolunteerModel.getAll();
+    const result = await EmailService.sendEventNotificationToVolunteers(event, volunteers);
+    return {
+      message: volunteers.length
+        ? `Email accepted for ${result.sentCount} volunteer(s). Failed: ${result.failedCount}.`
+        : "No registered volunteers to notify.",
+      emailBroadcast: { dispatched: true, ...result },
+    };
+  } catch (error) {
+    console.warn("Volunteer broadcast failed:", error.message);
+    return { message: "Volunteer email failed. Check the server logs.", emailBroadcast: { dispatched: false, sentCount: 0 } };
+  }
+}
+
 /**
  * @controller  getAllEvents
  * @route       GET /admin/events
@@ -64,8 +84,6 @@ async function createEvent(req, res) {
       end_time,
       eligibleYears,
       eligible_years,
-      sendEmailNotification,
-      send_email_notification,
     } = req.body;
 
     const eventMode = mode === "remote" ? "remote" : "offline";
@@ -114,32 +132,12 @@ async function createEvent(req, res) {
       eligible_years: parsedYears,
     });
 
-    const shouldSendEmail =
-      sendEmailNotification === true ||
-      sendEmailNotification === "true" ||
-      send_email_notification === true ||
-      send_email_notification === "true";
-
-    let emailResult = { sentCount: 0, dispatched: false };
-    if (shouldSendEmail) {
-      try {
-        const allVolunteers = await VolunteerModel.getAll();
-        emailResult = await EmailService.sendEventNotificationToVolunteers(eventRecord, allVolunteers);
-        emailResult.dispatched = true;
-      } catch (mailErr) {
-        console.warn("⚠️ Volunteer email broadcast notice:", mailErr.message);
-      }
-    }
-
-    const successMessage = shouldSendEmail
-      ? `Event "${eventTitle}" posted successfully! Email alerts sent to ${emailResult.sentCount || 0} registered volunteers.`
-      : `Event "${eventTitle}" posted successfully! (Email broadcast disabled by admin)`;
-
+    const notice = await volunteerNotice(req.body, eventRecord);
     return res.status(201).json({
       success: true,
-      message: successMessage,
+      message: `Event published. ${notice.message}`,
       data: eventRecord,
-      emailBroadcast: emailResult,
+      emailBroadcast: notice.emailBroadcast,
     });
   } catch (err) {
     console.error("createEvent error:", err);
@@ -179,20 +177,30 @@ async function updateEvent(req, res) {
     const updates = {
       title: title?.trim(),
       description: description?.trim(),
+      mode: req.body.mode,
+      student_volunteers_needed: req.body.studentVolunteersNeeded,
+      alumni_volunteers_needed: req.body.alumniVolunteersNeeded,
+      task_to_complete: req.body.taskToComplete,
+      duration: req.body.duration,
+      eligible_years: req.body.eligibleYears,
+      start_time: req.body.startTime,
+      end_time: req.body.endTime,
       event_date: date,
       event_time: time || null,
       location: location?.trim(),
       category: category || "Workshop",
       target_audience: targetAudience || null,
-      image_url: s3BannerKey || null,
+      image_url: imageUrl === undefined ? undefined : s3BannerKey || null,
       status: status || "upcoming",
     };
 
     const updated = await EventModel.update(id, updates);
+    const notice = await volunteerNotice(req.body, updated);
 
     return res.status(200).json({
       success: true,
-      message: "Event updated successfully",
+      message: `Event updated. ${notice.message}`,
+      emailBroadcast: notice.emailBroadcast,
       data: updated,
     });
   } catch (err) {

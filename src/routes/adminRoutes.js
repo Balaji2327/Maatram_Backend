@@ -52,6 +52,10 @@ router.post("/students/:email/academics", requireSignedAdmin, adminController.sa
 router.get("/alumni", adminController.getAllAlumni);
 
 // Posts Management
+router.post("/posts/media", authenticateAdminToken,
+  express.raw({ type: ["image/jpeg", "image/png", "image/webp", "image/gif"], limit: "10mb" }),
+  express.raw({ type: ["video/mp4", "video/webm"], limit: "50mb" }),
+  adminController.uploadPostMedia);
 router.get("/posts", adminController.getAllPosts);
 router.post("/posts", authenticateAdminToken, adminController.createPost);
 router.put("/posts/:id", authenticateAdminToken, adminController.updatePost);
