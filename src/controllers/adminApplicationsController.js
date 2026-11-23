@@ -76,6 +76,19 @@ async function getAllApplications(req, res) {
         physical_volunteer_affiliation: ext.physical_volunteer_affiliation || "",
         physical_volunteer_suggestion: ext.physical_volunteer_suggestion || "",
         physical_verification_notes: ext.physical_verification_notes || "",
+        physical_student_description: ext.physical_student_description || ext.student_description || "",
+        physical_verification_photos: ext.physical_verification_photos || ext.photos || {
+          front_view_home: ext.front_view_home || "",
+          inside_home: ext.inside_home || "",
+          furniture: ext.furniture || "",
+          with_student: ext.with_student || "",
+          backward: ext.backward || "",
+        },
+        front_view_home: ext.front_view_home || ext.physical_verification_photos?.front_view_home || "",
+        inside_home: ext.inside_home || ext.physical_verification_photos?.inside_home || "",
+        furniture: ext.furniture || ext.physical_verification_photos?.furniture || "",
+        with_student: ext.with_student || ext.physical_verification_photos?.with_student || "",
+        backward: ext.backward || ext.physical_verification_photos?.backward || "",
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(app.document_10th_marksheet || ""),
@@ -186,6 +199,19 @@ async function getApplicationById(req, res) {
         physical_volunteer_affiliation: ext.physical_volunteer_affiliation || "",
         physical_volunteer_suggestion: ext.physical_volunteer_suggestion || "",
         physical_verification_notes: ext.physical_verification_notes || "",
+        physical_student_description: ext.physical_student_description || ext.student_description || "",
+        physical_verification_photos: ext.physical_verification_photos || ext.photos || {
+          front_view_home: ext.front_view_home || "",
+          inside_home: ext.inside_home || "",
+          furniture: ext.furniture || "",
+          with_student: ext.with_student || "",
+          backward: ext.backward || "",
+        },
+        front_view_home: ext.front_view_home || ext.physical_verification_photos?.front_view_home || "",
+        inside_home: ext.inside_home || ext.physical_verification_photos?.inside_home || "",
+        furniture: ext.furniture || ext.physical_verification_photos?.furniture || "",
+        with_student: ext.with_student || ext.physical_verification_photos?.with_student || "",
+        backward: ext.backward || ext.physical_verification_photos?.backward || "",
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(application.document_10th_marksheet || ""),
@@ -456,6 +482,38 @@ async function updateVolunteerSuggestion(req, res) {
       if (volunteer_affiliation !== undefined) {
         additionalRemarks.physical_volunteer_affiliation = volunteer_affiliation;
       }
+
+      const studentDesc =
+        req.body.student_description !== undefined
+          ? req.body.student_description
+          : req.body.physical_student_description;
+      if (studentDesc !== undefined) {
+        additionalRemarks.physical_student_description = studentDesc;
+        additionalRemarks.student_description = studentDesc;
+      }
+
+      const rawPhotos = req.body.photos || req.body.physical_verification_photos || {};
+      const front_view_home = req.body.front_view_home || rawPhotos.front_view_home || rawPhotos.frontViewHome;
+      const inside_home = req.body.inside_home || rawPhotos.inside_home || rawPhotos.insideHome;
+      const furniture = req.body.furniture || rawPhotos.furniture;
+      const with_student = req.body.with_student || rawPhotos.with_student || rawPhotos.withStudent;
+      const backward = req.body.backward || rawPhotos.backward;
+
+      const photosObj = {
+        front_view_home: front_view_home || additionalRemarks.front_view_home || additionalRemarks.physical_verification_photos?.front_view_home || "",
+        inside_home: inside_home || additionalRemarks.inside_home || additionalRemarks.physical_verification_photos?.inside_home || "",
+        furniture: furniture || additionalRemarks.furniture || additionalRemarks.physical_verification_photos?.furniture || "",
+        with_student: with_student || additionalRemarks.with_student || additionalRemarks.physical_verification_photos?.with_student || "",
+        backward: backward || additionalRemarks.backward || additionalRemarks.physical_verification_photos?.backward || "",
+      };
+
+      additionalRemarks.physical_verification_photos = photosObj;
+      if (front_view_home) additionalRemarks.front_view_home = front_view_home;
+      if (inside_home) additionalRemarks.inside_home = inside_home;
+      if (furniture) additionalRemarks.furniture = furniture;
+      if (with_student) additionalRemarks.with_student = with_student;
+      if (backward) additionalRemarks.backward = backward;
+      additionalRemarks.physical_verification_completed_at = new Date().toISOString();
     } else {
       if (suggestion !== undefined) {
         additionalRemarks.volunteer_suggestion = suggestion;
@@ -516,6 +574,13 @@ async function updateVolunteerSuggestion(req, res) {
         tele_volunteer_name: additionalRemarks.tele_volunteer_name,
         physical_volunteer_suggestion: additionalRemarks.physical_volunteer_suggestion,
         physical_volunteer_name: additionalRemarks.physical_volunteer_name,
+        physical_student_description: additionalRemarks.physical_student_description,
+        physical_verification_photos: additionalRemarks.physical_verification_photos,
+        front_view_home: additionalRemarks.front_view_home,
+        inside_home: additionalRemarks.inside_home,
+        furniture: additionalRemarks.furniture,
+        with_student: additionalRemarks.with_student,
+        backward: additionalRemarks.backward,
       },
     });
   } catch (err) {
