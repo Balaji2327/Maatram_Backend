@@ -348,6 +348,7 @@ function mapDbToFormData(row) {
 
     // Video Interview Details
     video_interview_link: ext.video_interview_link || ext.google_meet_link || ext.meet_link || "",
+    directInterviewLocation: ext.direct_interview_location || undefined,
     video_interview_time: ext.video_interview_time || "",
     video_interview_event_id: ext.video_interview_event_id || "",
   };
@@ -549,6 +550,7 @@ async function getStatus(req, res) {
     let rejectionReason = "";
     let rejectionStage = 1;
     let videoInterviewLink = "";
+    let directInterviewLocation;
     let videoInterviewTime = "";
     try {
       if (app?.additional_remarks) {
@@ -565,6 +567,7 @@ async function getStatus(req, res) {
           rejectionStage = Number(parsed.rejectionStage) || 1;
         }
         videoInterviewLink = parsed?.video_interview_link || parsed?.google_meet_link || parsed?.meet_link || "";
+        directInterviewLocation = parsed?.direct_interview_location || undefined;
         videoInterviewTime = parsed?.video_interview_time || "";
       }
     } catch {
@@ -581,6 +584,7 @@ async function getStatus(req, res) {
       rejectionReason: rejectionReason || undefined,
       rejectionStage: app?.status === "rejected" ? rejectionStage : undefined,
       videoInterviewLink: videoInterviewLink || undefined,
+      directInterviewLocation,
       videoInterviewTime: videoInterviewTime || undefined,
     });
   } catch (err) {

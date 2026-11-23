@@ -61,7 +61,7 @@ class ApplicationModel {
     return data;
   }
 
-  static async update(id, updates) {
+  static async update(id, updates, expectedUpdatedAt) {
     if (!id) throw new Error("Missing application ID or application_number for update");
     const payload = { ...updates };
     const isIdUuid = ApplicationModel.isUUID(id);
@@ -156,15 +156,15 @@ class ApplicationModel {
       payload.additional_remarks = JSON.stringify(additionalRemarks);
     }
 
-    const { data, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from("applications")
       .update({
         ...payload,
         updated_at: new Date().toISOString(),
       })
-      .eq(filterCol, id)
-      .select()
-      .maybeSingle();
+      .eq(filterCol, id);
+    if (expectedUpdatedAt) query = query.eq("updated_at", expectedUpdatedAt);
+    const { data, error } = await query.select().maybeSingle();
 
     if (error) throw new Error(error.message);
     return data;

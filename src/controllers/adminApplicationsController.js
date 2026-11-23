@@ -3,6 +3,29 @@ const { StorageService } = require("../services/storageService");
 const { EmailService } = require("../services/emailService");
 const { GoogleMeetService } = require("../services/googleMeetService");
 
+const photoSlots = ["front_view_home", "inside_home", "furniture", "with_student", "backward"];
+
+function storedPhotos(app, remarks) {
+  const nested = remarks.physical_verification_photos || remarks.photos || app.physical_verification_photos || app.photos || {};
+  return Object.fromEntries(photoSlots.map(slot => {
+    const alias = slot.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+    return [slot, remarks[slot] || remarks[alias] || nested[slot] || nested[alias] || app[slot] || app[alias] || ""];
+  }));
+}
+
+function photoKey(value) {
+  if (typeof value !== "string") return "";
+  const match = value.match(/(?:^|\/admin\/media\/|\.amazonaws\.com\/)(physical_verification\/[\w.-]+)$/);
+  return match?.[1] || "";
+}
+
+function displayPhotos(photos) {
+  return Object.fromEntries(photoSlots.map(slot => {
+    const value = photos[slot];
+    return [slot, value.startsWith("data:image/") ? value : StorageService.getMediaUrl(photoKey(value) || value)];
+  }));
+}
+
 /**
  * @controller  getAllApplications
  * @route       GET /admin/applications
@@ -60,20 +83,7 @@ async function getAllApplications(req, res) {
         }
       }
 
-      const rawPhotoSource = ext.physical_verification_photos || ext.photos || app.physical_verification_photos || app.photos || {};
-      const front_view_home = ext.front_view_home || ext.frontViewHome || rawPhotoSource.front_view_home || rawPhotoSource.frontViewHome || app.front_view_home || app.frontViewHome || "";
-      const inside_home = ext.inside_home || ext.insideHome || rawPhotoSource.inside_home || rawPhotoSource.insideHome || app.inside_home || app.insideHome || "";
-      const furniture = ext.furniture || rawPhotoSource.furniture || app.furniture || "";
-      const with_student = ext.with_student || ext.withStudent || rawPhotoSource.with_student || rawPhotoSource.withStudent || app.with_student || app.withStudent || "";
-      const backward = ext.backward || rawPhotoSource.backward || app.backward || "";
-
-      const resolvedPhotos = {
-        front_view_home: StorageService.getMediaUrl(front_view_home),
-        inside_home: StorageService.getMediaUrl(inside_home),
-        furniture: StorageService.getMediaUrl(furniture),
-        with_student: StorageService.getMediaUrl(with_student),
-        backward: StorageService.getMediaUrl(backward),
-      };
+      const resolvedPhotos = displayPhotos(storedPhotos(app, ext));
 
       return {
         ...app,
@@ -194,20 +204,7 @@ async function getApplicationById(req, res) {
       }
     }
 
-    const rawPhotoSource = ext.physical_verification_photos || ext.photos || application.physical_verification_photos || application.photos || {};
-    const front_view_home = ext.front_view_home || ext.frontViewHome || rawPhotoSource.front_view_home || rawPhotoSource.frontViewHome || application.front_view_home || application.frontViewHome || "";
-    const inside_home = ext.inside_home || ext.insideHome || rawPhotoSource.inside_home || rawPhotoSource.insideHome || application.inside_home || application.insideHome || "";
-    const furniture = ext.furniture || rawPhotoSource.furniture || application.furniture || "";
-    const with_student = ext.with_student || ext.withStudent || rawPhotoSource.with_student || rawPhotoSource.withStudent || application.with_student || application.withStudent || "";
-    const backward = ext.backward || rawPhotoSource.backward || application.backward || "";
-
-    const resolvedPhotos = {
-      front_view_home: StorageService.getMediaUrl(front_view_home),
-      inside_home: StorageService.getMediaUrl(inside_home),
-      furniture: StorageService.getMediaUrl(furniture),
-      with_student: StorageService.getMediaUrl(with_student),
-      backward: StorageService.getMediaUrl(backward),
-    };
+    const resolvedPhotos = displayPhotos(storedPhotos(application, ext));
 
     return res.status(200).json({
       success: true,
@@ -297,11 +294,15 @@ async function updateApplicationStatus(req, res) {
       });
     }
 
+    const entersDirectInterview = ["video_interview_done", "shortlisted", "direct_interview_in_progress"].includes(status);
+    const location = typeof req.body.directInterviewLocation === "string" ? req.body.directInterviewLocation.trim() : "";
+
     // Load existing record for metadata and email notification
     let existing = null;
     try {
       existing = await ApplicationModel.findById(id);
     } catch (eFind) {
+      if (entersDirectInterview) throw eFind;
       console.warn("Could not fetch existing application:", eFind.message);
     }
 
@@ -355,6 +356,21 @@ async function updateApplicationStatus(req, res) {
       current_stage,
       stage_status,
     };
+
+    if (entersDirectInterview) {
+      if (!existing) return res.status(404).json({ success: false, message: "Application not found." });
+      let remarks = existing.additional_remarks || {};
+      if (typeof remarks === "string") {
+        try { remarks = JSON.parse(remarks); }
+        catch { remarks = { customRemarks: existing.additional_remarks }; }
+      }
+      if (!remarks || typeof remarks !== "object" || Array.isArray(remarks)) remarks = { customRemarks: existing.additional_remarks };
+      const venue = location || remarks.direct_interview_location;
+      if (typeof venue !== "string" || !venue.trim()) {
+        return res.status(400).json({ success: false, message: "Enter the direct interview location." });
+      }
+      updatePayload.additional_remarks = JSON.stringify({ ...remarks, direct_interview_location: venue.trim() });
+    }
 
     // If status is rejected, persist the rejection reason
     if (status === "rejected") {
@@ -452,7 +468,10 @@ async function updateApplicationStatus(req, res) {
       }
     }
 
-    const data = await ApplicationModel.update(id, updatePayload);
+    const data = await ApplicationModel.update(id, updatePayload, entersDirectInterview ? existing.updated_at : undefined);
+    if (entersDirectInterview && !data) {
+      return res.status(409).json({ success: false, message: "The application changed. Reopen it and try again." });
+    }
 
     // If application was rejected, send notification email to student via Resend
     if (status === "rejected") {
@@ -511,14 +530,11 @@ async function updateVolunteerSuggestion(req, res) {
     const volunteer_role = req.body.volunteer_role || req.body.role;
     const volunteer_affiliation = req.body.volunteer_affiliation || req.body.affiliation;
 
-    let existing = null;
-    try {
-      existing = await ApplicationModel.findById(id);
-    } catch (eFind) {
-      console.warn("Could not fetch existing application:", eFind.message);
-    }
-
-    const targetId = existing?.id || id;
+    const existing = await ApplicationModel.findById(id);
+    if (!existing) return res.status(404).json({ success: false, message: "Application not found" });
+    const targetId = existing.id;
+    const uploadedKeys = [];
+    const replacedKeys = [];
 
     let additionalRemarks = {};
     if (typeof existing?.additional_remarks === "string") {
@@ -560,72 +576,37 @@ async function updateVolunteerSuggestion(req, res) {
         additionalRemarks.student_description = studentDesc;
       }
 
-      const rawPhotos = req.body.photos || req.body.physical_verification_photos || {};
-      let front_view_home = req.body.front_view_home || rawPhotos.front_view_home || rawPhotos.frontViewHome;
-      let inside_home = req.body.inside_home || rawPhotos.inside_home || rawPhotos.insideHome;
-      let furniture = req.body.furniture || rawPhotos.furniture;
-      let with_student = req.body.with_student || rawPhotos.with_student || rawPhotos.withStudent;
-      let backward = req.body.backward || rawPhotos.backward;
+      if (typeof suggestion !== "string" || !suggestion.trim() || typeof studentDesc !== "string" || !studentDesc.trim()) {
+        return res.status(400).json({ success: false, message: "Enter the student description and final recommendation." });
+      }
 
-      // Handle uploading new photos to S3 and deleting previous photos if replaced or changed
-      const uploadAndReplaceS3Photo = async (newPhotoData, keyName, previousPhotoData) => {
-        if (!newPhotoData || typeof newPhotoData !== "string") {
-          // If explicitly cleared (empty string), delete old photo from S3 if it was an S3 key
-          if (previousPhotoData && typeof previousPhotoData === "string" && !previousPhotoData.startsWith("data:") && previousPhotoData.includes("physical_verification")) {
-            StorageService.deleteMedia(previousPhotoData).catch((err) =>
-              console.warn(`[Physical Verification] Could not delete old S3 photo ${previousPhotoData}:`, err.message)
-            );
-          }
-          return "";
+      const previous = storedPhotos(existing, additionalRemarks);
+      const incoming = req.body.photos || req.body.physical_verification_photos || {};
+      const photos = {};
+      for (const slot of photoSlots) {
+        const alias = slot.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+        const value = req.body[slot] ?? incoming[slot] ?? incoming[alias] ?? previous[slot];
+        if (typeof value === "string" && /^data:image\/(?:jpeg|png|webp|gif|avif);base64,[A-Za-z0-9+/]+={0,2}$/i.test(value)) {
+          photos[slot] = value;
+        } else if (photoKey(value) && photoKey(value) === photoKey(previous[slot])) {
+          photos[slot] = photoKey(value);
+        } else {
+          return res.status(400).json({ success: false, message: `Upload the required photo for ${slot.replace(/_/g, " ")}.` });
         }
+      }
 
-        // If it's a new base64 image
-        if (newPhotoData.startsWith("data:image")) {
-          try {
-            const s3Key = await StorageService.uploadMedia(newPhotoData, "physical_verification", `${targetId}_${keyName}`);
-            // If upload succeeded and there was an existing old S3 photo different from the new key, delete the old one
-            if (s3Key && previousPhotoData && previousPhotoData !== s3Key && !previousPhotoData.startsWith("data:") && previousPhotoData.includes("physical_verification")) {
-              StorageService.deleteMedia(previousPhotoData).catch((err) =>
-                console.warn(`[Physical Verification] Could not delete previous S3 photo ${previousPhotoData}:`, err.message)
-              );
-            }
-            return s3Key || newPhotoData;
-          } catch (uploadErr) {
-            console.error(`[Physical Verification] S3 upload failed for ${keyName}:`, uploadErr.message);
-            return newPhotoData;
-          }
+      try {
+        for (const slot of photoSlots) {
+          if (!photos[slot].startsWith("data:")) continue;
+          photos[slot] = await StorageService.uploadMedia(photos[slot], "physical_verification", `${targetId}_${slot}`);
+          uploadedKeys.push(photos[slot]);
+          if (photoKey(previous[slot])) replacedKeys.push(photoKey(previous[slot]));
         }
-
-        return newPhotoData;
-      };
-
-      const prevPhotos = additionalRemarks.physical_verification_photos || {};
-      const prev_front = additionalRemarks.front_view_home || prevPhotos.front_view_home;
-      const prev_inside = additionalRemarks.inside_home || prevPhotos.inside_home;
-      const prev_furniture = additionalRemarks.furniture || prevPhotos.furniture;
-      const prev_with_student = additionalRemarks.with_student || prevPhotos.with_student;
-      const prev_backward = additionalRemarks.backward || prevPhotos.backward;
-
-      front_view_home = await uploadAndReplaceS3Photo(front_view_home, "front_view_home", prev_front);
-      inside_home = await uploadAndReplaceS3Photo(inside_home, "inside_home", prev_inside);
-      furniture = await uploadAndReplaceS3Photo(furniture, "furniture", prev_furniture);
-      with_student = await uploadAndReplaceS3Photo(with_student, "with_student", prev_with_student);
-      backward = await uploadAndReplaceS3Photo(backward, "backward", prev_backward);
-
-      const photosObj = {
-        front_view_home: front_view_home || prev_front || "",
-        inside_home: inside_home || prev_inside || "",
-        furniture: furniture || prev_furniture || "",
-        with_student: with_student || prev_with_student || "",
-        backward: backward || prev_backward || "",
-      };
-
-      additionalRemarks.physical_verification_photos = photosObj;
-      additionalRemarks.front_view_home = photosObj.front_view_home;
-      additionalRemarks.inside_home = photosObj.inside_home;
-      additionalRemarks.furniture = photosObj.furniture;
-      additionalRemarks.with_student = photosObj.with_student;
-      additionalRemarks.backward = photosObj.backward;
+      } catch (error) {
+        await StorageService.deleteMultipleMedia(uploadedKeys);
+        throw error;
+      }
+      Object.assign(additionalRemarks, photos, { physical_verification_photos: photos });
       additionalRemarks.physical_verification_completed_at = new Date().toISOString();
     } else {
       if (suggestion !== undefined) {
@@ -673,7 +654,15 @@ async function updateVolunteerSuggestion(req, res) {
           }),
     };
 
-    const data = await ApplicationModel.update(targetId, updatePayload);
+    const data = await ApplicationModel.update(targetId, updatePayload, phase === "physical" ? existing.updated_at : undefined);
+    if (!data) {
+      await StorageService.deleteMultipleMedia(uploadedKeys);
+      return res.status(409).json({ success: false, message: "The application changed. Reopen the report and try again." });
+    }
+    if (phase === "physical") {
+      const retained = Object.values(additionalRemarks.physical_verification_photos);
+      await StorageService.deleteMultipleMedia(replacedKeys.filter(key => !retained.includes(key)));
+    }
 
     return res.status(200).json({
       success: true,
