@@ -1,6 +1,7 @@
 const { ApplicationModel } = require("../models/Application");
 const { StorageService } = require("../services/storageService");
 const { EmailService } = require("../services/emailService");
+const { GoogleMeetService } = require("../services/googleMeetService");
 
 /**
  * @controller  getAllApplications
@@ -58,6 +59,22 @@ async function getAllApplications(req, res) {
           } catch {}
         }
       }
+
+      const rawPhotoSource = ext.physical_verification_photos || ext.photos || app.physical_verification_photos || app.photos || {};
+      const front_view_home = ext.front_view_home || ext.frontViewHome || rawPhotoSource.front_view_home || rawPhotoSource.frontViewHome || app.front_view_home || app.frontViewHome || "";
+      const inside_home = ext.inside_home || ext.insideHome || rawPhotoSource.inside_home || rawPhotoSource.insideHome || app.inside_home || app.insideHome || "";
+      const furniture = ext.furniture || rawPhotoSource.furniture || app.furniture || "";
+      const with_student = ext.with_student || ext.withStudent || rawPhotoSource.with_student || rawPhotoSource.withStudent || app.with_student || app.withStudent || "";
+      const backward = ext.backward || rawPhotoSource.backward || app.backward || "";
+
+      const resolvedPhotos = {
+        front_view_home: StorageService.getMediaUrl(front_view_home),
+        inside_home: StorageService.getMediaUrl(inside_home),
+        furniture: StorageService.getMediaUrl(furniture),
+        with_student: StorageService.getMediaUrl(with_student),
+        backward: StorageService.getMediaUrl(backward),
+      };
+
       return {
         ...app,
         ...ext,
@@ -77,18 +94,16 @@ async function getAllApplications(req, res) {
         physical_volunteer_suggestion: ext.physical_volunteer_suggestion || "",
         physical_verification_notes: ext.physical_verification_notes || "",
         physical_student_description: ext.physical_student_description || ext.student_description || "",
-        physical_verification_photos: ext.physical_verification_photos || ext.photos || {
-          front_view_home: ext.front_view_home || "",
-          inside_home: ext.inside_home || "",
-          furniture: ext.furniture || "",
-          with_student: ext.with_student || "",
-          backward: ext.backward || "",
-        },
-        front_view_home: ext.front_view_home || ext.physical_verification_photos?.front_view_home || "",
-        inside_home: ext.inside_home || ext.physical_verification_photos?.inside_home || "",
-        furniture: ext.furniture || ext.physical_verification_photos?.furniture || "",
-        with_student: ext.with_student || ext.physical_verification_photos?.with_student || "",
-        backward: ext.backward || ext.physical_verification_photos?.backward || "",
+        physical_verification_photos: resolvedPhotos,
+        front_view_home: resolvedPhotos.front_view_home,
+        inside_home: resolvedPhotos.inside_home,
+        furniture: resolvedPhotos.furniture,
+        with_student: resolvedPhotos.with_student,
+        backward: resolvedPhotos.backward,
+        // Video Interview details
+        video_interview_link: ext.video_interview_link || ext.google_meet_link || ext.meet_link || "",
+        video_interview_time: ext.video_interview_time || "",
+        video_interview_event_id: ext.video_interview_event_id || "",
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(app.document_10th_marksheet || ""),
@@ -179,6 +194,21 @@ async function getApplicationById(req, res) {
       }
     }
 
+    const rawPhotoSource = ext.physical_verification_photos || ext.photos || application.physical_verification_photos || application.photos || {};
+    const front_view_home = ext.front_view_home || ext.frontViewHome || rawPhotoSource.front_view_home || rawPhotoSource.frontViewHome || application.front_view_home || application.frontViewHome || "";
+    const inside_home = ext.inside_home || ext.insideHome || rawPhotoSource.inside_home || rawPhotoSource.insideHome || application.inside_home || application.insideHome || "";
+    const furniture = ext.furniture || rawPhotoSource.furniture || application.furniture || "";
+    const with_student = ext.with_student || ext.withStudent || rawPhotoSource.with_student || rawPhotoSource.withStudent || application.with_student || application.withStudent || "";
+    const backward = ext.backward || rawPhotoSource.backward || application.backward || "";
+
+    const resolvedPhotos = {
+      front_view_home: StorageService.getMediaUrl(front_view_home),
+      inside_home: StorageService.getMediaUrl(inside_home),
+      furniture: StorageService.getMediaUrl(furniture),
+      with_student: StorageService.getMediaUrl(with_student),
+      backward: StorageService.getMediaUrl(backward),
+    };
+
     return res.status(200).json({
       success: true,
       data: {
@@ -200,18 +230,16 @@ async function getApplicationById(req, res) {
         physical_volunteer_suggestion: ext.physical_volunteer_suggestion || "",
         physical_verification_notes: ext.physical_verification_notes || "",
         physical_student_description: ext.physical_student_description || ext.student_description || "",
-        physical_verification_photos: ext.physical_verification_photos || ext.photos || {
-          front_view_home: ext.front_view_home || "",
-          inside_home: ext.inside_home || "",
-          furniture: ext.furniture || "",
-          with_student: ext.with_student || "",
-          backward: ext.backward || "",
-        },
-        front_view_home: ext.front_view_home || ext.physical_verification_photos?.front_view_home || "",
-        inside_home: ext.inside_home || ext.physical_verification_photos?.inside_home || "",
-        furniture: ext.furniture || ext.physical_verification_photos?.furniture || "",
-        with_student: ext.with_student || ext.physical_verification_photos?.with_student || "",
-        backward: ext.backward || ext.physical_verification_photos?.backward || "",
+        physical_verification_photos: resolvedPhotos,
+        front_view_home: resolvedPhotos.front_view_home,
+        inside_home: resolvedPhotos.inside_home,
+        furniture: resolvedPhotos.furniture,
+        with_student: resolvedPhotos.with_student,
+        backward: resolvedPhotos.backward,
+        // Video Interview details
+        video_interview_link: ext.video_interview_link || ext.google_meet_link || ext.meet_link || "",
+        video_interview_time: ext.video_interview_time || "",
+        video_interview_event_id: ext.video_interview_event_id || "",
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(application.document_10th_marksheet || ""),
@@ -384,6 +412,46 @@ async function updateApplicationStatus(req, res) {
       }
     }
 
+    // Automatically generate Google Meet link when advancing to Phase 3 (Video Call Interview)
+    if (status === "physical_verification_done" || status === "home_visit_done" || status === "video_interview_in_progress") {
+      try {
+        let additionalRemarks = {};
+        if (typeof existing?.additional_remarks === "string") {
+          try {
+            additionalRemarks = JSON.parse(existing.additional_remarks || "{}");
+          } catch {
+            additionalRemarks = { customRemarks: existing.additional_remarks };
+          }
+        } else if (existing?.additional_remarks && typeof existing.additional_remarks === "object") {
+          additionalRemarks = { ...existing.additional_remarks };
+        }
+
+        // Only generate if not already generated, or if specifically moving to Phase 3
+        if (!additionalRemarks.video_interview_link && !additionalRemarks.google_meet_link) {
+          const studentName = existing?.full_name || directName || "Applicant";
+          const studentEmail = existing?.email || directEmail || "";
+          const applicationNumber = existing?.application_number || "MF-2025-APP";
+
+          const meetingResult = await GoogleMeetService.createMeeting({
+            studentName,
+            studentEmail,
+            applicationNumber,
+          });
+
+          if (meetingResult?.meetLink) {
+            additionalRemarks.video_interview_link = meetingResult.meetLink;
+            additionalRemarks.google_meet_link = meetingResult.meetLink;
+            additionalRemarks.video_interview_time = meetingResult.scheduledTime;
+            additionalRemarks.video_interview_event_id = meetingResult.eventId;
+            updatePayload.additional_remarks = JSON.stringify(additionalRemarks);
+            console.log(`[Phase 3 Auto-Meet] Generated meet link for application ${id}: ${meetingResult.meetLink}`);
+          }
+        }
+      } catch (errMeet) {
+        console.error("[Phase 3 Auto-Meet] Error generating meet link:", errMeet.message);
+      }
+    }
+
     const data = await ApplicationModel.update(id, updatePayload);
 
     // If application was rejected, send notification email to student via Resend
@@ -493,26 +561,71 @@ async function updateVolunteerSuggestion(req, res) {
       }
 
       const rawPhotos = req.body.photos || req.body.physical_verification_photos || {};
-      const front_view_home = req.body.front_view_home || rawPhotos.front_view_home || rawPhotos.frontViewHome;
-      const inside_home = req.body.inside_home || rawPhotos.inside_home || rawPhotos.insideHome;
-      const furniture = req.body.furniture || rawPhotos.furniture;
-      const with_student = req.body.with_student || rawPhotos.with_student || rawPhotos.withStudent;
-      const backward = req.body.backward || rawPhotos.backward;
+      let front_view_home = req.body.front_view_home || rawPhotos.front_view_home || rawPhotos.frontViewHome;
+      let inside_home = req.body.inside_home || rawPhotos.inside_home || rawPhotos.insideHome;
+      let furniture = req.body.furniture || rawPhotos.furniture;
+      let with_student = req.body.with_student || rawPhotos.with_student || rawPhotos.withStudent;
+      let backward = req.body.backward || rawPhotos.backward;
+
+      // Handle uploading new photos to S3 and deleting previous photos if replaced or changed
+      const uploadAndReplaceS3Photo = async (newPhotoData, keyName, previousPhotoData) => {
+        if (!newPhotoData || typeof newPhotoData !== "string") {
+          // If explicitly cleared (empty string), delete old photo from S3 if it was an S3 key
+          if (previousPhotoData && typeof previousPhotoData === "string" && !previousPhotoData.startsWith("data:") && previousPhotoData.includes("physical_verification")) {
+            StorageService.deleteMedia(previousPhotoData).catch((err) =>
+              console.warn(`[Physical Verification] Could not delete old S3 photo ${previousPhotoData}:`, err.message)
+            );
+          }
+          return "";
+        }
+
+        // If it's a new base64 image
+        if (newPhotoData.startsWith("data:image")) {
+          try {
+            const s3Key = await StorageService.uploadMedia(newPhotoData, "physical_verification", `${targetId}_${keyName}`);
+            // If upload succeeded and there was an existing old S3 photo different from the new key, delete the old one
+            if (s3Key && previousPhotoData && previousPhotoData !== s3Key && !previousPhotoData.startsWith("data:") && previousPhotoData.includes("physical_verification")) {
+              StorageService.deleteMedia(previousPhotoData).catch((err) =>
+                console.warn(`[Physical Verification] Could not delete previous S3 photo ${previousPhotoData}:`, err.message)
+              );
+            }
+            return s3Key || newPhotoData;
+          } catch (uploadErr) {
+            console.error(`[Physical Verification] S3 upload failed for ${keyName}:`, uploadErr.message);
+            return newPhotoData;
+          }
+        }
+
+        return newPhotoData;
+      };
+
+      const prevPhotos = additionalRemarks.physical_verification_photos || {};
+      const prev_front = additionalRemarks.front_view_home || prevPhotos.front_view_home;
+      const prev_inside = additionalRemarks.inside_home || prevPhotos.inside_home;
+      const prev_furniture = additionalRemarks.furniture || prevPhotos.furniture;
+      const prev_with_student = additionalRemarks.with_student || prevPhotos.with_student;
+      const prev_backward = additionalRemarks.backward || prevPhotos.backward;
+
+      front_view_home = await uploadAndReplaceS3Photo(front_view_home, "front_view_home", prev_front);
+      inside_home = await uploadAndReplaceS3Photo(inside_home, "inside_home", prev_inside);
+      furniture = await uploadAndReplaceS3Photo(furniture, "furniture", prev_furniture);
+      with_student = await uploadAndReplaceS3Photo(with_student, "with_student", prev_with_student);
+      backward = await uploadAndReplaceS3Photo(backward, "backward", prev_backward);
 
       const photosObj = {
-        front_view_home: front_view_home || additionalRemarks.front_view_home || additionalRemarks.physical_verification_photos?.front_view_home || "",
-        inside_home: inside_home || additionalRemarks.inside_home || additionalRemarks.physical_verification_photos?.inside_home || "",
-        furniture: furniture || additionalRemarks.furniture || additionalRemarks.physical_verification_photos?.furniture || "",
-        with_student: with_student || additionalRemarks.with_student || additionalRemarks.physical_verification_photos?.with_student || "",
-        backward: backward || additionalRemarks.backward || additionalRemarks.physical_verification_photos?.backward || "",
+        front_view_home: front_view_home || prev_front || "",
+        inside_home: inside_home || prev_inside || "",
+        furniture: furniture || prev_furniture || "",
+        with_student: with_student || prev_with_student || "",
+        backward: backward || prev_backward || "",
       };
 
       additionalRemarks.physical_verification_photos = photosObj;
-      if (front_view_home) additionalRemarks.front_view_home = front_view_home;
-      if (inside_home) additionalRemarks.inside_home = inside_home;
-      if (furniture) additionalRemarks.furniture = furniture;
-      if (with_student) additionalRemarks.with_student = with_student;
-      if (backward) additionalRemarks.backward = backward;
+      additionalRemarks.front_view_home = photosObj.front_view_home;
+      additionalRemarks.inside_home = photosObj.inside_home;
+      additionalRemarks.furniture = photosObj.furniture;
+      additionalRemarks.with_student = photosObj.with_student;
+      additionalRemarks.backward = photosObj.backward;
       additionalRemarks.physical_verification_completed_at = new Date().toISOString();
     } else {
       if (suggestion !== undefined) {

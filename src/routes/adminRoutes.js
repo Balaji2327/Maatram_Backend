@@ -53,6 +53,6 @@ router.get("/volunteers/list", adminController.getRegisteredVolunteers);
 router.get("/volunteers/status/:email", adminController.checkVolunteerStatus);
 
 // Media Streaming Proxy (Streams S3 assets directly to browsers)
-router.get("/media/{*key}", adminController.streamMedia);
+router.get(/^\/media\/(.+)$/, adminController.streamMedia);
 
 module.exports = router;

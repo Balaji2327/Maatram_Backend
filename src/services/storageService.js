@@ -1,17 +1,26 @@
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
 const crypto = require("crypto");
-require("dotenv").config();
+const path = require("path");
+require("dotenv").config({ path: path.resolve(__dirname, "../../.env") });
 
 const AWS_REGION = process.env.AWS_REGION || "ap-south-1";
 const AWS_S3_BUCKET = process.env.AWS_S3_BUCKET || "maatram-post-media";
 
-const s3Client = new S3Client({
-  region: AWS_REGION,
-  credentials: {
-    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  },
-});
+let _s3ClientInstance = null;
+function getS3Client() {
+  if (!_s3ClientInstance) {
+    _s3ClientInstance = new S3Client({
+      region: process.env.AWS_REGION || "ap-south-1",
+      credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+      },
+    });
+  }
+  return _s3ClientInstance;
+}
+
+const s3Client = getS3Client();
 
 class StorageService {
   /**
@@ -68,14 +77,16 @@ class StorageService {
       // Generated S3 Key
       const s3Key = `${folder}/${uniqueId}_${cleanFileName}`;
 
+      const client = getS3Client();
+      const bucketName = process.env.AWS_S3_BUCKET || AWS_S3_BUCKET;
       const command = new PutObjectCommand({
-        Bucket: AWS_S3_BUCKET,
+        Bucket: bucketName,
         Key: s3Key,
         Body: buffer,
         ContentType: mimeType,
       });
 
-      await s3Client.send(command);
+      await client.send(command);
       console.log(`[AWS S3] Uploaded successfully: ${s3Key}`);
 
       // Return the key alone as requested
@@ -113,11 +124,13 @@ class StorageService {
     }
 
     try {
+      const client = getS3Client();
+      const bucketName = process.env.AWS_S3_BUCKET || AWS_S3_BUCKET;
       const command = new DeleteObjectCommand({
-        Bucket: AWS_S3_BUCKET,
+        Bucket: bucketName,
         Key: s3Key,
       });
-      await s3Client.send(command);
+      await client.send(command);
       console.log(`[AWS S3] Deleted object: ${s3Key}`);
       return true;
     } catch (err) {

@@ -345,6 +345,11 @@ function mapDbToFormData(row) {
         ? ext.volunteer_suggestion.replace("Application rejected:", "").trim()
         : ""),
     rejectionStage: ext.rejectionStage || (ext.volunteer_name || row.volunteer_name ? 2 : 1),
+
+    // Video Interview Details
+    video_interview_link: ext.video_interview_link || ext.google_meet_link || ext.meet_link || "",
+    video_interview_time: ext.video_interview_time || "",
+    video_interview_event_id: ext.video_interview_event_id || "",
   };
 }
 
@@ -543,6 +548,8 @@ async function getStatus(req, res) {
 
     let rejectionReason = "";
     let rejectionStage = 1;
+    let videoInterviewLink = "";
+    let videoInterviewTime = "";
     try {
       if (app?.additional_remarks) {
         const parsed =
@@ -557,6 +564,8 @@ async function getStatus(req, res) {
         if (parsed?.rejectionStage) {
           rejectionStage = Number(parsed.rejectionStage) || 1;
         }
+        videoInterviewLink = parsed?.video_interview_link || parsed?.google_meet_link || parsed?.meet_link || "";
+        videoInterviewTime = parsed?.video_interview_time || "";
       }
     } catch {
       // ignore JSON parse error
@@ -571,6 +580,8 @@ async function getStatus(req, res) {
       submittedAt: app?.submitted_at,
       rejectionReason: rejectionReason || undefined,
       rejectionStage: app?.status === "rejected" ? rejectionStage : undefined,
+      videoInterviewLink: videoInterviewLink || undefined,
+      videoInterviewTime: videoInterviewTime || undefined,
     });
   } catch (err) {
     console.error("getStatus error:", err);
