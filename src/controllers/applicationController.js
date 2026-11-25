@@ -52,6 +52,47 @@ async function uploadAllApplicationDocuments(formData) {
 
 function yes(value) { return value === true || value === "Yes" || value === "true"; }
 
+const admissionColumns = {
+  whatsappNumber: "whatsapp_number",
+  community: "community",
+  nationality: "nationality",
+  maritalStatus: "marital_status",
+  fatherEmploymentStatus: "father_employment_status",
+  motherEmploymentStatus: "mother_employment_status",
+  familyMembersCount: "family_members_count",
+  familyType: "family_type",
+  familySituation: "family_situation",
+  guardianRelation: "guardian_relation",
+  siblingCount: "sibling_count",
+  siblingsStudyingCount: "siblings_studying_count",
+  permanentAddress: "permanent_address",
+  currentAddress: "current_address",
+  sameAsPermanent: "same_as_permanent",
+  villageTown: "village_town",
+  state: "state",
+  residenceType: "residence_type",
+  collegeDistance: "college_distance",
+  mediumOfInstruction: "medium_of_instruction",
+  eleventhStream: "eleventh_stream",
+  secondBranch: "second_branch",
+  preferredCollegeLocation: "preferred_college_location",
+  careerGoal: "career_goal",
+  incomeSources: "income_sources",
+  familyDebts: "family_debts",
+  educationLoans: "education_loans",
+  financialDifficulties: "financial_difficulties",
+  whyNeedSupport: "why_need_support",
+  affordabilityWithoutSupport: "affordability_without_support",
+  specialCircumstances: "special_circumstances",
+  careerAmbition: "career_ambition",
+  futureGoals: "future_goals",
+  declarationAgreed: "declaration_agreed",
+  documentCommunityCertificate: "document_community_certificate",
+  documentIncomeCertificate: "document_income_certificate",
+  documentParentIdProof: "document_parent_id_proof",
+  studentPhoto: "student_photo",
+};
+
 function mapFormDataToDb(formData) {
   // Extract and serialize any extended fields into additional_remarks JSON wrapper
   const extendedData = {
@@ -99,15 +140,19 @@ function mapFormDataToDb(formData) {
   };
 
   return {
+    ...Object.fromEntries(Object.entries(admissionColumns).map(([field, column]) => [column, formData[field]])),
+    first_generation_learner: formData.firstGenerationLearner == null ? undefined : yes(formData.firstGenerationLearner),
+    willing_to_relocate_tn: formData.willingToRelocateTN == null ? undefined : yes(formData.willingToRelocateTN),
+    single_parent_status: typeof formData.singleParent === "string" ? formData.singleParent : undefined,
     full_name: formData.fullName,
     dob: formData.dob || null,
     gender: formData.gender,
     blood_group: formData.bloodGroup,
     aadhaar_number: formData.aadhaarNumber,
     mobile_number: formData.mobileNumber,
-    alt_mobile_number: formData.altMobileNumber || formData.whatsappNumber,
+    alt_mobile_number: formData.altMobileNumber ?? null,
     email: formData.email,
-    address: formData.currentAddress || formData.permanentAddress || formData.address,
+    address: (formData.sameAsPermanent ? formData.permanentAddress : formData.currentAddress) || formData.permanentAddress || formData.address,
     district: formData.district,
     pincode: formData.pincode,
 
@@ -127,46 +172,50 @@ function mapFormDataToDb(formData) {
     housing_status: formData.residenceType || formData.housingStatus,
     rent_amount: formData.rentAmount || null,
     first_graduate: yes(formData.firstGraduate),
-    single_parent: Boolean(yes(formData.singleParent) || formData.familySituation === "Single parent"),
-    orphan: Boolean(yes(formData.orphan) || formData.familySituation === "Orphan"),
+    single_parent: formData.singleParent == null ? formData.familySituation === "Single parent" : yes(formData.singleParent) || ["Single Mother", "Single Father"].includes(formData.singleParent),
+    orphan: formData.orphan == null ? formData.familySituation === "Orphan" : yes(formData.orphan),
     differently_abled: yes(formData.differentlyAbled),
     siblings: formData.siblings || [],
 
     // 10th Standard
-    tenth_school_name: formData.tenthSchoolName || formData.tenthSchool,
+    tenth_school_name: formData.tenthSchool ?? formData.tenthSchoolName,
     tenth_school_address: formData.tenthSchoolAddress,
     tenth_board: formData.tenthBoard,
-    tenth_pass_year: formData.tenthPassYear || formData.tenthYear,
-    tenth_marks_obtained: formData.tenthMarksObtained || formData.tenthTotalMarks ? parseFloat(formData.tenthMarksObtained || formData.tenthTotalMarks) : null,
+    tenth_pass_year: formData.tenthYear ?? formData.tenthPassYear,
+    tenth_subjects: formData.tenthSubjects,
+    tenth_marks_obtained: formData.tenthTotalMarks || formData.tenthMarksObtained ? parseFloat(formData.tenthTotalMarks || formData.tenthMarksObtained) : null,
     tenth_max_marks: formData.tenthMaxMarks ? parseFloat(formData.tenthMaxMarks) : null,
     tenth_percentage: formData.tenthPercentage ? parseFloat(formData.tenthPercentage) : null,
 
     // 11th Standard
-    eleventh_school_name: formData.eleventhSchoolName || formData.eleventhSchool,
+    eleventh_school_name: formData.eleventhSchool ?? formData.eleventhSchoolName,
     eleventh_school_address: formData.eleventhSchoolAddress,
     eleventh_board: formData.eleventhBoard,
-    eleventh_pass_year: formData.eleventhPassYear || formData.eleventhYear,
+    eleventh_pass_year: formData.eleventhYear ?? formData.eleventhPassYear,
     eleventh_subjects: formData.eleventhSubjects || [],
     eleventh_total_marks: formData.eleventhTotalMarks ? parseFloat(formData.eleventhTotalMarks) : null,
     eleventh_max_marks: formData.eleventhMaxMarks ? parseFloat(formData.eleventhMaxMarks) : null,
     eleventh_percentage: formData.eleventhPercentage ? parseFloat(formData.eleventhPercentage) : null,
 
     // 12th Standard
-    twelfth_school_name: formData.twelfthSchoolName || formData.twelfthSchool,
+    twelfth_school_name: formData.twelfthSchool ?? formData.twelfthSchoolName,
     twelfth_school_address: formData.twelfthSchoolAddress,
     twelfth_board: formData.twelfthBoard,
-    twelfth_pass_year: formData.twelfthPassYear || formData.twelfthYear,
-    twelfth_group: formData.twelfthGroup || formData.twelfthStream,
+    twelfth_pass_year: formData.twelfthYear ?? formData.twelfthPassYear,
+    twelfth_group: formData.twelfthStream ?? formData.twelfthGroup,
     twelfth_subjects: formData.twelfthSubjects || [],
     twelfth_total_marks: formData.twelfthTotalMarks ? parseFloat(formData.twelfthTotalMarks) : null,
     twelfth_max_marks: formData.twelfthMaxMarks ? parseFloat(formData.twelfthMaxMarks) : null,
     twelfth_percentage: formData.twelfthPercentage ? parseFloat(formData.twelfthPercentage) : null,
     twelfth_cutoff: formData.twelfthCutoff ? parseFloat(formData.twelfthCutoff) : null,
+    engineering_cutoff: formData.engineeringCutoff || null,
+    paramedical_cutoff: formData.paramedicalCutoff || null,
 
     // Preferences
     preferred_degree: formData.preferredDegree,
-    preferred_courses: formData.preferredCourses || (formData.preferredBranch ? [formData.preferredBranch, formData.secondBranch].filter(Boolean) : []),
-    preferred_districts: formData.preferredDistricts || (formData.preferredCollegeLocation ? [formData.preferredCollegeLocation] : []),
+    preferred_branch: formData.preferredBranch,
+    preferred_courses: formData.preferredBranch == null ? formData.preferredCourses || [] : [formData.preferredBranch, formData.secondBranch].filter(Boolean),
+    preferred_districts: formData.preferredCollegeLocation == null ? formData.preferredDistricts || [] : [formData.preferredCollegeLocation].filter(Boolean),
     hostel_required: yes(formData.hostelRequired),
     additional_remarks: JSON.stringify(extendedData),
 
@@ -196,12 +245,18 @@ function mapDbToFormData(record) {
     }
   }
 
+  // Older applications stored these fields in remarks. Some older columns also have defaults.
+  for (const [field, column] of Object.entries(admissionColumns)) {
+    ext[field] ??= row[column];
+  }
+  const yesNo = value => yes(value) ? "Yes" : "No";
+
   const preferredCourses = row.preferred_courses || [];
   const primaryCourse = (Array.isArray(preferredCourses) && preferredCourses[0]) || row.preferred_branch || "";
   const secondaryCourse = (Array.isArray(preferredCourses) && preferredCourses[1]) || ext.secondBranch || "";
 
   return {
-    tenthSubjects: ext.tenthSubjects || [], mediumOfInstruction: ext.mediumOfInstruction, declarationAgreed: ext.declarationAgreed,
+    tenthSubjects: row.tenth_subjects ?? ext.tenthSubjects ?? [], mediumOfInstruction: ext.mediumOfInstruction, declarationAgreed: ext.declarationAgreed,
     eleventhStream: ext.eleventhStream, careerGoal: ext.careerGoal,
     id: row.id,
     applicationNumber: row.application_number,
@@ -216,7 +271,7 @@ function mapDbToFormData(record) {
     gender: row.gender || "",
     bloodGroup: row.blood_group || "",
     mobileNumber: row.mobile_number || "",
-    whatsappNumber: ext.whatsappNumber || row.alt_mobile_number || "",
+    whatsappNumber: ext.whatsappNumber ?? row.alt_mobile_number ?? "",
     altMobileNumber: row.alt_mobile_number || "",
     email: row.email || "",
     aadhaarNumber: row.aadhaar_number || "",
@@ -253,8 +308,8 @@ function mapDbToFormData(record) {
     siblings: row.siblings || [],
 
     // D. Address Information
-    permanentAddress: ext.permanentAddress || row.address || "",
-    currentAddress: ext.currentAddress || row.address || "",
+    permanentAddress: ext.permanentAddress ?? row.address ?? "",
+    currentAddress: ext.currentAddress ?? row.address ?? "",
     sameAsPermanent: ext.sameAsPermanent ?? true,
     address: row.address || "",
     villageTown: ext.villageTown || "",
@@ -282,6 +337,7 @@ function mapDbToFormData(record) {
     eleventhSchoolName: row.eleventh_school_name || "",
     eleventhSchoolAddress: row.eleventh_school_address || "",
     eleventhBoard: row.eleventh_board || "",
+    eleventhYear: row.eleventh_pass_year || "",
     eleventhPassYear: row.eleventh_pass_year || "",
     eleventhSubjects: row.eleventh_subjects || [],
     eleventhTotalMarks: row.eleventh_total_marks?.toString() || "",
@@ -301,14 +357,16 @@ function mapDbToFormData(record) {
     twelfthMaxMarks: row.twelfth_max_marks?.toString() || "600",
     twelfthPercentage: row.twelfth_percentage?.toString() || "",
     twelfthCutoff: row.twelfth_cutoff?.toString() || "",
-    firstGraduate: row.first_graduate ?? ext.firstGraduate ?? "",
+    engineeringCutoff: row.engineering_cutoff?.toString() || "",
+    paramedicalCutoff: row.paramedical_cutoff?.toString() || "",
+    firstGraduate: yesNo(row.first_graduate ?? ext.firstGraduate),
     preferredDegree: row.preferred_degree || "",
     preferredBranch: primaryCourse,
     secondBranch: secondaryCourse,
     preferredCourses: row.preferred_courses || [],
     preferredCollegeLocation: ext.preferredCollegeLocation || (row.preferred_districts && row.preferred_districts[0]) || "",
     preferredDistricts: row.preferred_districts || [],
-    hostelRequired: row.hostel_required ?? false,
+    hostelRequired: yesNo(row.hostel_required),
 
     // F. Financial Information
     incomeSources: ext.incomeSources || "",
@@ -319,13 +377,13 @@ function mapDbToFormData(record) {
     affordabilityWithoutSupport: ext.affordabilityWithoutSupport || "",
 
     // G. Personal and Background Information
-    orphan: row.orphan ?? (ext.familySituation === "Orphan"),
-    singleParent: row.single_parent ?? (ext.familySituation === "Single parent"),
-    firstGenerationLearner: ext.firstGenerationLearner ?? row.first_graduate ?? ext.firstGraduate,
+    orphan: yesNo(row.orphan ?? (ext.familySituation === "Orphan")),
+    singleParent: row.single_parent_status ?? (row.single_parent ? "Yes" : "No"),
+    firstGenerationLearner: yesNo(ext.firstGenerationLearner ?? row.first_generation_learner ?? row.first_graduate ?? ext.firstGraduate),
     differentlyAbled: row.differently_abled ?? false,
     specialCircumstances: ext.specialCircumstances || "",
     careerAmbition: ext.careerAmbition || "",
-    willingToRelocateTN: ext.willingToRelocateTN ?? "",
+    willingToRelocateTN: yesNo(ext.willingToRelocateTN ?? row.willing_to_relocate_tn),
     futureGoals: ext.futureGoals || "",
     additionalRemarks: ext.customRemarks || "",
 

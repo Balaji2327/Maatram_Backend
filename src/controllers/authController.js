@@ -359,8 +359,10 @@ async function signup(req, res) {
       if (error) throw error;
       return data && { success: true, challengeId, expiresAt: Date.parse(data.expires_at), sentAt: Date.parse(data.sent_at) };
     }
-    const existing = await resumeChallenge();
-    if (existing) return res.json(existing);
+    if (req.body.retry !== false) {
+      const existing = await resumeChallenge();
+      if (existing) return res.json(existing);
+    }
     const code = signupCode();
     const { data, error } = await supabaseAdmin.rpc("start_applicant_signup", {
       address: cleanEmail, challenge: challengeId, digest: signupDigest(challengeId, code),

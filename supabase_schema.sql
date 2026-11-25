@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS public.applications (
     tenth_school_address TEXT,
     tenth_board VARCHAR(100),
     tenth_pass_year VARCHAR(10),
+    tenth_subjects JSONB,
     tenth_marks_obtained NUMERIC(6, 2),
     tenth_max_marks NUMERIC(6, 2),
     tenth_percentage NUMERIC(5, 2),
@@ -104,6 +105,8 @@ CREATE TABLE IF NOT EXISTS public.applications (
     twelfth_max_marks NUMERIC(6, 2),
     twelfth_percentage NUMERIC(5, 2),
     twelfth_cutoff NUMERIC(6, 2),
+    engineering_cutoff NUMERIC(6, 2),
+    paramedical_cutoff NUMERIC(6, 2),
     
     -- Higher Education Preferences
     preferred_degree VARCHAR(100), -- 'B.E / B.Tech', 'Arts & Science', etc.
@@ -128,6 +131,12 @@ CREATE TABLE IF NOT EXISTS public.applications (
     career_ambition TEXT,
     willing_to_relocate_tn BOOLEAN DEFAULT true,
     future_goals TEXT,
+    same_as_permanent BOOLEAN,
+    eleventh_stream TEXT,
+    medium_of_instruction TEXT,
+    declaration_agreed BOOLEAN,
+    career_goal TEXT,
+    single_parent_status TEXT,
     additional_remarks TEXT,
     
     -- Documents (AWS S3 Object Keys / URLs)
@@ -607,3 +616,17 @@ revoke all on function public.start_applicant_signup(text,uuid,text,text,text,te
   public.consume_applicant_signup(uuid,text) from public, anon, authenticated;
 grant execute on function public.start_applicant_signup(text,uuid,text,text,text,text),
   public.consume_applicant_signup(uuid,text) to service_role;
+
+-- Subject marks for existing applications installations.
+ALTER TABLE public.applications ADD COLUMN IF NOT EXISTS tenth_subjects JSONB;
+
+-- Admission form fields on existing installations.
+ALTER TABLE public.applications
+    ADD COLUMN IF NOT EXISTS same_as_permanent BOOLEAN,
+    ADD COLUMN IF NOT EXISTS eleventh_stream TEXT,
+    ADD COLUMN IF NOT EXISTS medium_of_instruction TEXT,
+    ADD COLUMN IF NOT EXISTS declaration_agreed BOOLEAN,
+    ADD COLUMN IF NOT EXISTS career_goal TEXT,
+    ADD COLUMN IF NOT EXISTS single_parent_status TEXT,
+    ADD COLUMN IF NOT EXISTS engineering_cutoff NUMERIC(6, 2),
+    ADD COLUMN IF NOT EXISTS paramedical_cutoff NUMERIC(6, 2);

@@ -8,6 +8,16 @@ class EmailService {
     const message = {
       from: process.env.FROM_EMAIL || "info@maatram.tech",
       subject: "Verify your Maatram application portal email",
+      html: `<div style="background:#fff;color:#161616;padding:24px 12px;font-family:Arial,sans-serif">
+        <table role="presentation" align="center" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;border:1px solid #ddd;border-top:5px solid #fabb05">
+          <tr><td style="padding:28px 24px 0;font-size:15px;font-weight:bold">Maatram Foundation</td></tr>
+          <tr><td style="padding:24px"><h1 style="margin:0 0 12px;font-size:24px">Verify your email</h1>
+            <p style="margin:0 0 20px;line-height:1.5">Enter this code on the student registration page to create your application portal account.</p>
+            <div style="background:#fff6d5;padding:18px;text-align:center;font:bold 32px monospace;letter-spacing:5px">${code}</div>
+            <p style="margin:16px 0 0;font-size:14px">Registration expires 10 minutes after you start.</p>
+          </td></tr>
+          <tr><td style="border-top:1px solid #ddd;padding:16px 24px;font-size:13px">If you did not request this code, you can ignore this email.</td></tr>
+        </table></div>`,
       text: "Enter " + code + " in the application portal to create your account. Registration expires 10 minutes after you start.",
     };
     const key = process.env.RESEND_API_KEY ||
