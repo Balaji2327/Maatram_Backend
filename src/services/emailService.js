@@ -68,6 +68,24 @@ class EmailService {
     });
   }
 
+  static async sendApplicationReceipt(app, accountEmail) {
+    const address = (accountEmail || app.email || "").trim();
+    if (!/^[^\s@,;<>]+@[^\s@,;<>]+$/.test(address)) throw new Error("Applicant email unavailable.");
+    const transporter = this.getTransporter();
+    if (!transporter) throw new Error("SMTP is not configured.");
+    await transporter.sendMail({
+      from: process.env.FROM_EMAIL || "info@maatram.tech",
+      to: { name: "", address },
+      subject: "Maatram Foundation received your application",
+      text: [
+        app.full_name ? `Dear ${app.full_name},` : "Dear applicant,",
+        `We’ve received your application for education support. Your application number is ${app.application_number}.`,
+        "Our admissions team will review your application and contact you about the next steps. Please keep your application number for reference.",
+        "Maatram Foundation Admissions Team",
+      ].join("\n\n"),
+    });
+  }
+
   static getTransporter() {
     const host = process.env.SMTP_HOST || "smtp.resend.com";
     const port = parseInt(process.env.SMTP_PORT || "587", 10);

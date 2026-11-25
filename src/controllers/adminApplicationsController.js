@@ -1,4 +1,4 @@
-const { ApplicationModel, admissionStatus } = require("../models/Application");
+const { ApplicationModel, admissionStatus, familyAnnualIncome } = require("../models/Application");
 const { StorageService } = require("../services/storageService");
 const { EmailService } = require("../services/emailService");
 const { GoogleMeetService } = require("../services/googleMeetService");
@@ -88,6 +88,7 @@ async function getAllApplications(req, res) {
       return {
         ...app,
         ...ext,
+        family_annual_income: familyAnnualIncome(app, ext),
         whyNeedSupport: ext.whyNeedSupport || app.whyNeedSupport || ext.why_scholarship || app.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || app.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
         volunteer_name: ext.volunteer_name || app.volunteer_name || ext.tele_volunteer_name || "",
@@ -217,6 +218,7 @@ async function getApplicationById(req, res) {
       data: {
         ...application,
         ...ext,
+        family_annual_income: familyAnnualIncome(application, ext),
         whyNeedSupport: ext.whyNeedSupport || application.whyNeedSupport || ext.why_scholarship || application.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || application.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
         volunteer_name: ext.volunteer_name || application.volunteer_name || ext.tele_volunteer_name || "",

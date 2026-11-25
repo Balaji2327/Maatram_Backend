@@ -2,6 +2,20 @@ const { supabaseAdmin } = require("../config/supabase");
 
 const legacySelectedStatus = "scholarship_awarded";
 
+// Income was historically free text. Convert only an unambiguous rupee amount.
+function annualizeMonthly(value) {
+  const amount = String(value ?? "").trim().replace(/^₹\s*/, "");
+  if (!/^(?:\d+|\d{1,3}(?:,\d{3})+|\d{1,2}(?:,\d{2})*,\d{3})(?:\.\d{1,2})?$/.test(amount)) return "";
+  const [rupees, paise = ""] = amount.replaceAll(",", "").split(".");
+  const total = BigInt(rupees + paise.padEnd(2, "0")) * 12n;
+  return String(total / 100n) + (total % 100n ? "." + String(total % 100n).padStart(2, "0").replace(/0$/, "") : "");
+}
+
+function familyAnnualIncome(row, remarks) {
+  return String(row.family_annual_income ?? "").trim() ||
+    annualizeMonthly(remarks?.monthlyFamilyIncome) || annualizeMonthly(row.monthly_family_income);
+}
+
 function admissionStatus(status) {
   return status === legacySelectedStatus ? "selected" : status;
 }
@@ -210,6 +224,8 @@ class ApplicationModel {
 }
 
 module.exports = {
+  annualizeMonthly,
+  familyAnnualIncome,
   admissionStatus,
   admissionRecord,
   ApplicationModel,

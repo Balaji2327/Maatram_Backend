@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 
 const JWT_SECRET = process.env.JWT_SECRET || "maatram_default_super_secret_jwt_key_2026";
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7h";
+const JWT_EXPIRES_IN = "7h";
 
 class JwtService {
   /**
@@ -22,7 +22,7 @@ class JwtService {
    * @returns {Object|null} Decoded payload or throws error
    */
   static verifyToken(token) {
-    return jwt.verify(token, JWT_SECRET);
+    return jwt.verify(token, JWT_SECRET, { maxAge: JWT_EXPIRES_IN });
   }
 
   /**

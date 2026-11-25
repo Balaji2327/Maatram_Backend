@@ -262,6 +262,7 @@ async function changeEmail(req, res) {
 
     const updated = await AdminService.updateAdmin(admin.id, { email: cleanEmail });
     const newAdminToken = JwtService.signToken({
+      iat: req.adminIssuedAt,
       id: updated.id,
       email: cleanEmail,
       role: updated.role || "admin",

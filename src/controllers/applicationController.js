@@ -1,4 +1,4 @@
-const { admissionRecord } = require("../models/Application");
+const { admissionRecord, familyAnnualIncome } = require("../models/Application");
 const { supabaseAdmin } = require("../config/supabase");
 const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
 const { EmailService } = require("../services/emailService");
@@ -40,10 +40,11 @@ async function uploadAllApplicationDocuments(formData) {
     { key: "documentParentIdProof", name: "parent_id_proof" },
   ];
 
-  for (const { key, name } of docFields) {
-    if (processed[key]) {
+  const uploads = docFields.filter(({ key }) => processed[key]?.startsWith?.("data:"));
+  for (let i = 0; i < uploads.length; i += 3) {
+    await Promise.all(uploads.slice(i, i + 3).map(async ({ key, name }) => {
       processed[key] = await processDocumentUpload(processed[key], name);
-    }
+    }));
   }
 
   return processed;
@@ -79,7 +80,7 @@ function mapFormDataToDb(formData) {
     firstGraduate: formData.firstGraduate ?? false,
     secondBranch: formData.secondBranch || "",
     preferredCollegeLocation: formData.preferredCollegeLocation || "",
-    monthlyFamilyIncome: formData.monthlyFamilyIncome || "",
+
     incomeSources: formData.incomeSources || "",
     familyDebts: formData.familyDebts || "",
     educationLoans: formData.educationLoans || "",
@@ -88,7 +89,6 @@ function mapFormDataToDb(formData) {
     affordabilityWithoutSupport: formData.affordabilityWithoutSupport || "",
     specialCircumstances: formData.specialCircumstances || "",
     careerAmbition: formData.careerAmbition || "",
-    higherEducationReason: formData.higherEducationReason || "",
     willingToRelocateTN: formData.willingToRelocateTN ?? true,
     futureGoals: formData.futureGoals || "",
     documentCommunityCertificate: formData.documentCommunityCertificate || "",
@@ -114,14 +114,16 @@ function mapFormDataToDb(formData) {
     // Family Details
     father_name: formData.fatherName,
     father_occupation: formData.fatherOccupation,
-    father_income: formData.fatherIncome || formData.fatherMonthlyIncome,
+    father_income: formData.fatherAnnualIncome ?? formData.fatherIncome ?? formData.fatherMonthlyIncome,
     mother_name: formData.motherName,
     mother_occupation: formData.motherOccupation,
-    mother_income: formData.motherIncome || formData.motherMonthlyIncome,
+    mother_income: formData.motherAnnualIncome ?? formData.motherIncome ?? formData.motherMonthlyIncome,
     guardian_name: formData.guardianName,
     guardian_occupation: formData.guardianOccupation,
-    guardian_income: formData.guardianIncome || formData.guardianMonthlyIncome,
-    family_annual_income: formData.annualIncome || formData.familyAnnualIncome || formData.annualFamilyIncome,
+    guardian_income: formData.guardianAnnualIncome ?? formData.guardianIncome ?? formData.guardianMonthlyIncome,
+    family_annual_income: familyAnnualIncome({
+      family_annual_income: formData.annualIncome ?? formData.familyAnnualIncome ?? formData.annualFamilyIncome,
+    }, formData),
     housing_status: formData.residenceType || formData.housingStatus,
     rent_amount: formData.rentAmount || null,
     first_graduate: yes(formData.firstGraduate),
@@ -225,23 +227,23 @@ function mapDbToFormData(record) {
     // B. Family Information
     fatherName: row.father_name || "",
     fatherOccupation: row.father_occupation || "",
-    fatherMonthlyIncome: row.father_income || "",
+    fatherAnnualIncome: row.father_income || "",
     fatherIncome: row.father_income || "",
     fatherEmploymentStatus: ext.fatherEmploymentStatus || "",
     motherName: row.mother_name || "",
     motherOccupation: row.mother_occupation || "",
-    motherMonthlyIncome: row.mother_income || "",
+    motherAnnualIncome: row.mother_income || "",
     motherIncome: row.mother_income || "",
     motherEmploymentStatus: ext.motherEmploymentStatus || "",
-    annualIncome: row.family_annual_income || "",
-    familyAnnualIncome: row.family_annual_income || "",
-    annualFamilyIncome: row.family_annual_income || "",
+    annualIncome: familyAnnualIncome(row, ext),
+    familyAnnualIncome: familyAnnualIncome(row, ext),
+    annualFamilyIncome: familyAnnualIncome(row, ext),
     familyMembersCount: ext.familyMembersCount || "",
     familyType: ext.familyType || "",
     familySituation: ext.familySituation || (row.orphan ? "Orphan" : row.single_parent ? "Single parent" : "Both parents"),
     guardianName: row.guardian_name || "",
     guardianOccupation: row.guardian_occupation || "",
-    guardianMonthlyIncome: row.guardian_income || "",
+    guardianAnnualIncome: row.guardian_income || "",
     guardianIncome: row.guardian_income || "",
     guardianRelation: ext.guardianRelation || "",
 
@@ -309,7 +311,6 @@ function mapDbToFormData(record) {
     hostelRequired: row.hostel_required ?? false,
 
     // F. Financial Information
-    monthlyFamilyIncome: ext.monthlyFamilyIncome || "",
     incomeSources: ext.incomeSources || "",
     familyDebts: ext.familyDebts || "",
     educationLoans: ext.educationLoans || "",
@@ -324,7 +325,6 @@ function mapDbToFormData(record) {
     differentlyAbled: row.differently_abled ?? false,
     specialCircumstances: ext.specialCircumstances || "",
     careerAmbition: ext.careerAmbition || "",
-    higherEducationReason: ext.higherEducationReason || "",
     willingToRelocateTN: ext.willingToRelocateTN ?? "",
     futureGoals: ext.futureGoals || "",
     additionalRemarks: ext.customRemarks || "",
@@ -486,10 +486,6 @@ async function submitApplication(req, res) {
   try {
     const userId = req.user.id;
     const rawFormData = req.body;
-    // 1. Upload any base64 document attachments directly to AWS S3
-    const formData = await uploadAllApplicationDocuments(rawFormData);
-    const dbPayload = mapFormDataToDb(formData);
-
     const { data: existingApp, error: lookupError } = await supabaseAdmin
       .from("applications")
       .select("id, application_number,status")
@@ -498,6 +494,8 @@ async function submitApplication(req, res) {
 
     if (lookupError) throw lookupError;
     if (existingApp && existingApp.status !== "draft") return res.status(409).json({ success: false, message: "This application has already been submitted." });
+    const formData = await uploadAllApplicationDocuments(rawFormData);
+    const dbPayload = mapFormDataToDb(formData);
     const appNumber =
       existingApp?.application_number && existingApp.application_number.startsWith("MF-2025-")
         ? existingApp.application_number
@@ -526,15 +524,17 @@ async function submitApplication(req, res) {
       });
     }
 
-    let adminNotified = false;
-    try { await EmailService.notifyAdmissions(updated); adminNotified = true; }
-    catch (mailError) { console.error("Admission saved; email delivery failed:", mailError.message); }
-    return res.status(200).json({
-      success: true, adminNotified,
+    res.status(200).json({
+      success: true,
       message: "Admission application submitted successfully!",
       applicationNumber: updated.application_number,
       data: mapDbToFormData(updated),
     });
+    // The database commit determines submission success. SMTP can finish afterwards.
+    await Promise.all([
+      EmailService.notifyAdmissions(updated).catch(err => console.error("Admissions notification failed:", err.message)),
+      EmailService.sendApplicationReceipt(updated, req.user.email).catch(err => console.error("Applicant receipt failed:", err.message)),
+    ]);
   } catch (err) {
     console.error("submitApplication error:", err);
     return res.status(500).json({

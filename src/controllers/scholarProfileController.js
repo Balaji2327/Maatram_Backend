@@ -1,5 +1,5 @@
 const { supabaseAdmin } = require("../config/supabase");
-const { ApplicationModel } = require("../models/Application");
+const { ApplicationModel, annualizeMonthly } = require("../models/Application");
 const { memberRole } = require("../services/membershipService");
 const { mapDbToFormData } = require("./applicationController");
 
@@ -8,11 +8,11 @@ const { StorageService } = require("../services/storageService");
 const sections = {
   "College and enrollment": "collegeName degreeBranch currentYear rollNumber attendance cgpa",
   "Personal details": "applicationNumber fullName submittedAt dob gender bloodGroup mobileNumber altMobileNumber whatsappNumber email aadhaarNumber community nationality maritalStatus",
-  "Family and siblings": "fatherName fatherOccupation fatherMonthlyIncome fatherEmploymentStatus motherName motherOccupation motherMonthlyIncome motherEmploymentStatus annualIncome familyMembersCount familyType familySituation guardianName guardianRelation guardianOccupation guardianMonthlyIncome siblingCount siblingsStudyingCount siblings",
+  "Family and siblings": "fatherName fatherOccupation fatherAnnualIncome fatherEmploymentStatus motherName motherOccupation motherAnnualIncome motherEmploymentStatus annualIncome familyMembersCount familyType familySituation guardianName guardianRelation guardianOccupation guardianAnnualIncome siblingCount siblingsStudyingCount siblings",
   "Residence": "permanentAddress currentAddress sameAsPermanent villageTown district state pincode residenceType rentAmount collegeDistance",
   "Schooling": "tenthSchool tenthSchoolAddress tenthYear tenthBoard tenthSubjects tenthTotalMarks tenthMaxMarks tenthPercentage eleventhSchool eleventhSchoolAddress eleventhBoard eleventhStream eleventhPassYear eleventhSubjects eleventhTotalMarks eleventhMaxMarks eleventhPercentage twelfthSchool twelfthSchoolAddress twelfthYear twelfthBoard twelfthStream twelfthSubjects twelfthTotalMarks twelfthMaxMarks twelfthPercentage twelfthCutoff mediumOfInstruction",
   "Study preferences": "preferredDegree preferredBranch secondBranch preferredCourses preferredCollegeLocation preferredDistricts hostelRequired firstGraduate careerGoal",
-  "Finances and goals": "monthlyFamilyIncome incomeSources familyDebts educationLoans affordabilityWithoutSupport financialDifficulties whyNeedSupport orphan singleParent firstGenerationLearner differentlyAbled specialCircumstances careerAmbition higherEducationReason willingToRelocateTN futureGoals additionalRemarks declarationAgreed",
+  "Finances and goals": "incomeSources familyDebts educationLoans affordabilityWithoutSupport financialDifficulties whyNeedSupport orphan singleParent firstGenerationLearner differentlyAbled specialCircumstances careerAmbition willingToRelocateTN futureGoals additionalRemarks declarationAgreed",
   "Application documents": "studentPhoto document10thMarksheet document11thMarksheet document12thMarksheet documentCommunityCertificate documentIncomeCertificate documentAadhaarCard documentParentIdProof",
 };
 const fields = Object.values(sections).flatMap(group => group.split(" "));
@@ -37,6 +37,13 @@ function buildProfile({ user, app }) {
     degreeBranch: meta.degree_branch || meta.degree, currentYear: meta.current_year, rollNumber: meta.roll_number,
     attendance: meta.attendance, cgpa: meta.cgpa };
   const values = Object.fromEntries(fields.map(key => [key, (!readOnly.has(key) ? meta["scholar_" + key] : undefined) ?? base[key] ?? ""]));
+  for (const person of ["father", "mother", "guardian"]) {
+    const field = person + "AnnualIncome";
+    if (meta["scholar_" + field] == null) {
+      values[field] = annualizeMonthly(meta["scholar_" + person + "MonthlyIncome"]) || values[field];
+    }
+  }
+  if (!values.annualIncome) values.annualIncome = annualizeMonthly(meta.scholar_monthlyFamilyIncome);
   const sheets = Object.keys(meta).filter(key => /^marksheet_[1-8]_(CAT_[123]|Semester_Exam)$/.test(key) && typeof meta[key] === "string" && meta[key].startsWith("scholar_marksheets/" + user.id + "/"));
   for (const key of sheets) values[key] = true;
   return { sections: sheets.length ? { ...sections, "Semester marksheets": sheets.join(" ") } : sections, values, readOnly: [...readOnly, ...sheets] };

@@ -115,7 +115,6 @@ CREATE TABLE IF NOT EXISTS public.applications (
     hostel_required BOOLEAN DEFAULT false,
 
     -- Financial Information
-    monthly_family_income VARCHAR(50),
     income_sources TEXT,
     family_debts TEXT,
     education_loans TEXT,
@@ -127,7 +126,6 @@ CREATE TABLE IF NOT EXISTS public.applications (
     first_generation_learner BOOLEAN DEFAULT false,
     special_circumstances TEXT,
     career_ambition TEXT,
-    higher_education_reason TEXT,
     willing_to_relocate_tn BOOLEAN DEFAULT true,
     future_goals TEXT,
     additional_remarks TEXT,
@@ -230,9 +228,7 @@ BEGIN
     END IF;
 
     -- Financial Information
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='monthly_family_income') THEN
-        ALTER TABLE public.applications ADD COLUMN monthly_family_income VARCHAR(50);
-    END IF;
+    ALTER TABLE public.applications ADD COLUMN IF NOT EXISTS family_annual_income VARCHAR(50);
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='income_sources') THEN
         ALTER TABLE public.applications ADD COLUMN income_sources TEXT;
     END IF;
@@ -262,9 +258,6 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='career_ambition') THEN
         ALTER TABLE public.applications ADD COLUMN career_ambition TEXT;
     END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='higher_education_reason') THEN
-        ALTER TABLE public.applications ADD COLUMN higher_education_reason TEXT;
-    END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='willing_to_relocate_tn') THEN
         ALTER TABLE public.applications ADD COLUMN willing_to_relocate_tn BOOLEAN DEFAULT true;
     END IF;
@@ -286,6 +279,101 @@ BEGIN
         ALTER TABLE public.applications ADD COLUMN document_parent_id_proof TEXT;
     END IF;
 END $$;
+
+-- Backfill annual income from legacy monthly amounts.
+BEGIN;
+
+ALTER TABLE public.applications ADD COLUMN IF NOT EXISTS family_annual_income VARCHAR(50);
+
+CREATE FUNCTION pg_temp.annual_rupees(value text) RETURNS text
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT CASE WHEN btrim(value) ~ '^₹?[[:space:]]*([0-9]+|[0-9]{1,3}(,[0-9]{3})+|[0-9]{1,2}(,[0-9]{2})*,[0-9]{3})([.][0-9]{1,2})?$'
+    THEN trim_scale(regexp_replace(btrim(value), '[₹,[:space:]]', '', 'g')::numeric * 12)::text END;
+$$;
+
+CREATE FUNCTION pg_temp.income_remarks(value text) RETURNS jsonb
+LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+  RETURN value::jsonb;
+EXCEPTION WHEN invalid_text_representation THEN
+  RETURN NULL;
+END;
+$$;
+
+-- Keep the legacy sources for audit, including free-text amounts that need review.
+WITH candidates AS (
+  SELECT id, coalesce(
+    pg_temp.annual_rupees(pg_temp.income_remarks(additional_remarks::text)->>'monthlyFamilyIncome'),
+    pg_temp.annual_rupees(to_jsonb(a)->>'monthly_family_income')
+  ) AS annual_amount
+  FROM public.applications a WHERE nullif(btrim(family_annual_income), '') IS NULL
+)
+UPDATE public.applications a SET family_annual_income = c.annual_amount
+FROM candidates c WHERE a.id = c.id AND length(c.annual_amount) <= 50
+  AND nullif(btrim(a.family_annual_income), '') IS NULL;
+
+-- Application parent-income columns were entered through annual-labelled inputs.
+COMMENT ON COLUMN public.applications.father_income IS 'Annual income in INR, as entered on the admission form.';
+COMMENT ON COLUMN public.applications.mother_income IS 'Annual income in INR, as entered on the admission form.';
+COMMENT ON COLUMN public.applications.guardian_income IS 'Annual income in INR, as entered on the admission form.';
+COMMENT ON COLUMN public.applications.family_annual_income IS 'Total annual household income in INR.';
+
+-- The editable scholar profile previously displayed its own overrides as monthly.
+DO $$
+DECLARE pair text[];
+BEGIN
+  FOREACH pair SLICE 1 IN ARRAY ARRAY[
+    ['scholar_fatherMonthlyIncome','scholar_fatherAnnualIncome'],
+    ['scholar_motherMonthlyIncome','scholar_motherAnnualIncome'],
+    ['scholar_guardianMonthlyIncome','scholar_guardianAnnualIncome']
+  ] LOOP
+    UPDATE auth.users SET raw_user_meta_data = jsonb_set(raw_user_meta_data, ARRAY[pair[2]],
+      to_jsonb(pg_temp.annual_rupees(raw_user_meta_data->>pair[1])))
+    WHERE NOT (raw_user_meta_data ? pair[2]) AND pg_temp.annual_rupees(raw_user_meta_data->>pair[1]) IS NOT NULL;
+  END LOOP;
+  UPDATE auth.users u SET raw_user_meta_data = jsonb_set(raw_user_meta_data, '{scholar_annualIncome}',
+    to_jsonb(pg_temp.annual_rupees(raw_user_meta_data->>'scholar_monthlyFamilyIncome')))
+  WHERE NOT (raw_user_meta_data ? 'scholar_annualIncome')
+    AND pg_temp.annual_rupees(raw_user_meta_data->>'scholar_monthlyFamilyIncome') IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM public.applications a WHERE a.user_id = u.id AND nullif(btrim(a.family_annual_income),'') IS NOT NULL);
+END;
+$$;
+
+DROP FUNCTION pg_temp.annual_rupees(text), pg_temp.income_remarks(text);
+COMMIT;
+
+-- Remove the retired higher-education question from existing applications and profiles.
+BEGIN;
+
+-- Older applications can contain either JSON or a free-text remark.
+CREATE FUNCTION pg_temp.without_education_reason(remarks text) RETURNS text
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE
+    fields jsonb;
+BEGIN
+    fields := remarks::jsonb;
+    IF jsonb_typeof(fields) = 'object' AND fields ? 'higherEducationReason' THEN
+        RETURN (fields - 'higherEducationReason')::text;
+    END IF;
+    RETURN remarks;
+EXCEPTION WHEN invalid_text_representation THEN
+    RETURN remarks;
+END;
+$$;
+
+UPDATE public.applications
+SET additional_remarks = pg_temp.without_education_reason(additional_remarks)
+WHERE additional_remarks LIKE '%higherEducationReason%'
+  AND additional_remarks IS DISTINCT FROM pg_temp.without_education_reason(additional_remarks);
+
+UPDATE auth.users
+SET raw_user_meta_data = raw_user_meta_data - 'scholar_higherEducationReason'
+WHERE raw_user_meta_data ? 'scholar_higherEducationReason';
+
+ALTER TABLE public.applications DROP COLUMN IF EXISTS higher_education_reason;
+DROP FUNCTION pg_temp.without_education_reason(text);
+
+COMMIT;
 
 -- 3. Row Level Security (RLS) Policies
 ALTER TABLE public.applications ENABLE ROW LEVEL SECURITY;
