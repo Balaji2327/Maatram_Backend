@@ -250,8 +250,9 @@ async function deliverSignupCode(res, email, challengeId, code) {
   try {
     await EmailService.sendSignupCode(email, code);
     return res.status(200).json({ success: true, challengeId });
-  } catch {
-    return res.status(503).json({ success: false, message: "We could not email your code. Please try again in 30 seconds." });
+  } catch (error) {
+    console.warn("Signup email delivery failed:", error.code || error.name);
+    return res.status(503).json({ success: false, challengeId, message: "Email delivery could not be confirmed. Check your inbox or request another code." });
   }
 }
 
@@ -348,14 +349,29 @@ async function signup(req, res) {
     if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(cleanEmail) || Buffer.byteLength(password) > 72) {
       return res.status(400).json({ success: false, message: "Enter a valid email and a password of up to 72 bytes." });
     }
-    const challengeId = randomUUID();
+    const clientId = signupChallenge(req);
+    const challengeId = clientId || randomUUID();
+    async function resumeChallenge() {
+      if (!clientId) return null;
+      const { data, error } = await supabaseAdmin.from("applicant_signup_codes")
+        .select("expires_at,sent_at").eq("email", cleanEmail).eq("challenge_id", clientId)
+        .gt("expires_at", new Date().toISOString()).gt("attempts_left", 0).maybeSingle();
+      if (error) throw error;
+      return data && { success: true, challengeId, expiresAt: Date.parse(data.expires_at), sentAt: Date.parse(data.sent_at) };
+    }
+    const existing = await resumeChallenge();
+    if (existing) return res.json(existing);
     const code = signupCode();
     const { data, error } = await supabaseAdmin.rpc("start_applicant_signup", {
       address: cleanEmail, challenge: challengeId, digest: signupDigest(challengeId, code),
       applicant_name: fullName.trim(), mobile: mobileNumber.trim(), secret_password: password,
     });
     if (error) throw error;
-    if (!data) return res.status(429).json({ success: false, message: "Wait 30 seconds before requesting another code." });
+    if (!data) {
+      const concurrent = await resumeChallenge();
+      if (concurrent) return res.json(concurrent);
+      return res.status(429).json({ success: false, message: "A code was recently requested for this email. Wait 30 seconds before starting again." });
+    }
     return deliverSignupCode(res, cleanEmail, challengeId, code);
   } catch (err) {
     console.error("signup controller error:", err);

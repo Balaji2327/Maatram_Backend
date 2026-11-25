@@ -5,14 +5,26 @@ const nodemailer = require("nodemailer");
  */
 class EmailService {
   static async sendSignupCode(email, code) {
-    const transporter = this.getTransporter();
-    if (!transporter) throw new Error("SMTP is not configured.");
-    await transporter.sendMail({
+    const message = {
       from: process.env.FROM_EMAIL || "info@maatram.tech",
-      to: { name: "", address: email },
       subject: "Verify your Maatram application portal email",
-      text: "Enter " + code + " in the application portal to create your account. Registration expires 10 minutes after you start. If you did not request this code, you can ignore this email.",
-    });
+      text: "Enter " + code + " in the application portal to create your account. Registration expires 10 minutes after you start.",
+    };
+    const key = process.env.RESEND_API_KEY ||
+      (process.env.SMTP_PASSWORD?.startsWith("re_") ? process.env.SMTP_PASSWORD : null);
+    if (key) {
+      const response = await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify({ ...message, to: [email] }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok || !(await response.json()).id) throw new Error("Resend status " + response.status);
+      return;
+    }
+    const transporter = this.getTransporter({ connectionTimeout: 6000, greetingTimeout: 6000, socketTimeout: 10000 });
+    if (!transporter) throw new Error("SMTP is not configured.");
+    await transporter.sendMail({ ...message, to: { name: "", address: email } });
   }
 
   static async sendPostNotification(post) {
@@ -97,7 +109,7 @@ class EmailService {
     });
   }
 
-  static getTransporter() {
+  static getTransporter(timeouts = {}) {
     const host = process.env.SMTP_HOST || "smtp.resend.com";
     const port = parseInt(process.env.SMTP_PORT || "587", 10);
     const user = process.env.SMTP_USER || "resend";
@@ -109,6 +121,7 @@ class EmailService {
     }
 
     return nodemailer.createTransport({
+      ...timeouts,
       host,
       port,
       secure: port === 465,
