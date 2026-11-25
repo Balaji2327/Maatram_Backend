@@ -1,6 +1,6 @@
 const { supabaseAdmin } = require("../config/supabase");
 const { ApplicationModel, annualizeMonthly } = require("../models/Application");
-const { memberRole } = require("../services/membershipService");
+const { memberRole, portalRole } = require("../services/membershipService");
 const { mapDbToFormData } = require("./applicationController");
 
 const { StorageService } = require("../services/storageService");
@@ -23,7 +23,8 @@ async function loadScholar(req, res, next) {
     const id = req.params.studentId || req.user.id;
     const [{ data, error }, app] = await Promise.all([supabaseAdmin.auth.admin.getUserById(id), ApplicationModel.findByUserId(id)]);
     if (error || !data?.user) return res.status(404).json({ success: false, message: "Student not found." });
-    if (memberRole(app, data.user.app_metadata?.role) !== "student") return res.status(403).json({ success: false, message: "Student admission is required." });
+    const role = req.params.studentId ? memberRole(app, data.user.app_metadata?.role) : portalRole(data.user, app);
+    if (role !== "student") return res.status(403).json({ success: false, message: "Student access is required." });
     req.scholar = { user: data.user, app };
     return next();
   } catch (error) { next(error); }

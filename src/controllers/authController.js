@@ -441,7 +441,7 @@ async function passwordLogin(req, res, membersOnly) {
     const { session, user } = data;
 
     const role = membersOnly ? await getMemberRole(user) : null;
-    if (membersOnly && !role) return res.status(403).json({ success: false, message: "Main portal access opens after final admission approval. Track your status in the applicant portal." });
+    if (membersOnly && !role) return res.status(403).json({ success: false, message: "This account does not have access to the student and alumni portal." });
 
     // Check if 2FA (Authenticator App) is enabled for this student/alumni
     const is2FAEnabled = Boolean(user?.user_metadata?.two_factor_enabled);
