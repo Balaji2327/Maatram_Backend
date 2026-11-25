@@ -1,7 +1,65 @@
+const { mapDbToFormData } = require("./applicationController");
 const { ApplicationModel, admissionStatus, familyAnnualIncome } = require("../models/Application");
 const { StorageService } = require("../services/storageService");
 const { EmailService } = require("../services/emailService");
 const { GoogleMeetService } = require("../services/googleMeetService");
+
+// Use the applicant portal's saved-field mapping for both administrative and assigned reviews.
+function applicationReview(row) {
+  const form = mapDbToFormData(row);
+  if (form.sameAsPermanent && form.permanentAddress) form.currentAddress = form.permanentAddress;
+  const section = (title, labels) => ({
+    title, fields: Object.entries(labels).map(([key, label]) => [label, form[key] ?? null]),
+  });
+  const siblings = form.siblings;
+  const familyMembers = section("Siblings", { siblingCount: "Number of siblings", siblingsStudyingCount: "Currently studying" });
+  if (Array.isArray(siblings) && siblings.length) {
+    familyMembers.table = { headings: ["Name", "Relationship", "Age", "Education or occupation", "Institution"],
+      rows: siblings.filter(Boolean).map(s => [s.name, s.relationship, s.age, s.education || s.occupation, s.institution]) };
+  } else if (typeof siblings === "string") familyMembers.fields.push(["Details", siblings]);
+
+  function schooling(grade, title) {
+    const subjects = form[grade + "Subjects"];
+    const rows = (Array.isArray(subjects) ? subjects : []).filter(Boolean).map(s =>
+      [s.subjectName || s.name || s.subject, s.marksObtained ?? s.marks, s.maxMarks ?? s.max_marks]);
+    const savedMax = row[grade + "_max_marks"];
+    const sum = index => rows.length && rows.every(r => r[index] != null && String(r[index]).trim() !== "" && Number.isFinite(Number(r[index])))
+      ? rows.reduce((total, r) => total + Number(r[index]), 0) : null;
+    const max = savedMax ?? sum(2);
+    const total = form[grade + "TotalMarks"] || sum(1);
+    const percentage = form[grade + "Percentage"] || (total != null && max > 0 ? (100 * Number(total) / max).toFixed(2) : null);
+    const fields = [["School", form[grade + "School"]], ["Board", form[grade + "Board"]], ["Passing year", form[grade + "Year"]],
+      ["School address", form[grade + "SchoolAddress"]]];
+    if (grade !== "tenth") fields.push(["Group / stream", form[grade + "Stream"]]);
+    fields.push(["Marks obtained", total], ["Maximum marks", max], ["Percentage", percentage]);
+    return { title, fields, table: { headings: ["Subject", "Marks obtained", "Maximum marks"], rows } };
+  }
+
+  return [
+    section("Personal details", { applicationNumber: "Application number", fullName: "Full name", dob: "Date of birth", gender: "Gender",
+      bloodGroup: "Blood group", mobileNumber: "Mobile", whatsappNumber: "WhatsApp", altMobileNumber: "Alternate mobile",
+      email: "Email", aadhaarNumber: "Aadhaar number", community: "Community", nationality: "Nationality", maritalStatus: "Marital status" }),
+    section("Family details", { fatherName: "Father's name", fatherOccupation: "Father's occupation", fatherEmploymentStatus: "Father's employment status",
+      fatherAnnualIncome: "Father's annual income", motherName: "Mother's name", motherOccupation: "Mother's occupation",
+      motherEmploymentStatus: "Mother's employment status", motherAnnualIncome: "Mother's annual income", guardianName: "Guardian's name",
+      guardianRelation: "Guardian's relationship", guardianOccupation: "Guardian's occupation", guardianAnnualIncome: "Guardian's annual income",
+      familyMembersCount: "Family members", familyType: "Family type", familySituation: "Family situation", annualIncome: "Annual family income" }),
+    familyMembers,
+    section("Address and residence", { permanentAddress: "Permanent address", sameAsPermanent: "Current address same as permanent",
+      currentAddress: "Current address", villageTown: "Village or town", district: "District", state: "State", pincode: "PIN code",
+      residenceType: "Residence type", rentAmount: "Rent", collegeDistance: "Distance to college" }),
+    schooling("tenth", "Class 10 marks"), schooling("eleventh", "Class 11 marks"), schooling("twelfth", "Class 12 marks"),
+    section("Higher education preferences", { mediumOfInstruction: "Medium of instruction", twelfthCutoff: "Admission cutoff",
+      engineeringCutoff: "Engineering cutoff", paramedicalCutoff: "Paramedical cutoff", firstGraduate: "First-generation graduate",
+      preferredDegree: "Preferred degree", preferredBranch: "First course preference", secondBranch: "Second course preference",
+      preferredCollegeLocation: "Preferred college or location", hostelRequired: "Hostel required", careerGoal: "Career goal" }),
+    section("Financial information", { incomeSources: "Income sources", familyDebts: "Family debts", educationLoans: "Education loans",
+      financialDifficulties: "Financial difficulties", whyNeedSupport: "Reason for requesting support", affordabilityWithoutSupport: "Ability to afford college without support" }),
+    section("Background and goals", { orphan: "Orphan status", singleParent: "Single-parent status", firstGenerationLearner: "First-generation learner",
+      specialCircumstances: "Special family circumstances", careerAmbition: "Career ambition", willingToRelocateTN: "Willing to relocate in Tamil Nadu",
+      futureGoals: "Future goals", additionalRemarks: "Additional remarks", declarationAgreed: "Applicant declaration agreed" }),
+  ];
+}
 
 const photoSlots = ["front_view_home", "inside_home", "furniture", "with_student", "backward"];
 
@@ -88,6 +146,7 @@ async function getAllApplications(req, res) {
       return {
         ...app,
         ...ext,
+        reviewSections: applicationReview(app),
         family_annual_income: familyAnnualIncome(app, ext),
         whyNeedSupport: ext.whyNeedSupport || app.whyNeedSupport || ext.why_scholarship || app.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || app.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
@@ -117,7 +176,7 @@ async function getAllApplications(req, res) {
         video_interview_time: ext.video_interview_time || "",
         video_interview_event_id: ext.video_interview_event_id || "",
         // Resolved Media / Document URLs
-        studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
+        studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || app.student_photo || ""),
         document10thMarksheet: StorageService.getMediaUrl(app.document_10th_marksheet || ""),
         document12thMarksheet: StorageService.getMediaUrl(app.document_12th_marksheet || ""),
         documentAadhaarCard: StorageService.getMediaUrl(app.document_aadhaar_card || ""),
@@ -214,6 +273,7 @@ async function getApplicationById(req, res) {
       data: {
         ...application,
         ...ext,
+        reviewSections: applicationReview(application),
         family_annual_income: familyAnnualIncome(application, ext),
         whyNeedSupport: ext.whyNeedSupport || application.whyNeedSupport || ext.why_scholarship || application.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || application.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
@@ -243,7 +303,7 @@ async function getApplicationById(req, res) {
         video_interview_time: ext.video_interview_time || "",
         video_interview_event_id: ext.video_interview_event_id || "",
         // Resolved Media / Document URLs
-        studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
+        studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || application.student_photo || ""),
         document10thMarksheet: StorageService.getMediaUrl(application.document_10th_marksheet || ""),
         document12thMarksheet: StorageService.getMediaUrl(application.document_12th_marksheet || ""),
         documentAadhaarCard: StorageService.getMediaUrl(application.document_aadhaar_card || ""),
