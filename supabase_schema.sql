@@ -564,3 +564,46 @@ FOR SELECT USING (bucket_id = 'maatram_bucket');
 -- Schema setup complete!
 -- =========================================================================
 
+
+-- Applicant email verification. Apply this block when upgrading an existing installation.
+create extension if not exists pgcrypto with schema extensions;
+create table if not exists public.applicant_signup_codes (
+  email text primary key, challenge_id uuid unique not null, code_digest text not null,
+  full_name text not null, mobile_number text not null, password_hash text not null,
+  attempts_left integer not null default 5, sent_at timestamptz not null default now(),
+  expires_at timestamptz not null default now() + interval '10 minutes'
+);
+alter table public.applicant_signup_codes enable row level security;
+revoke all on public.applicant_signup_codes from public, anon, authenticated;
+grant select, insert, update, delete on public.applicant_signup_codes to service_role;
+
+create or replace function public.start_applicant_signup(address text, challenge uuid, digest text,
+  applicant_name text, mobile text, secret_password text) returns boolean
+language plpgsql set search_path = public, extensions as $$
+begin
+  delete from public.applicant_signup_codes where expires_at <= now();
+  insert into public.applicant_signup_codes (email, challenge_id, code_digest, full_name, mobile_number, password_hash)
+  values (address, challenge, digest, applicant_name, mobile, crypt(secret_password, gen_salt('bf', 10)))
+  on conflict (email) do update set challenge_id = excluded.challenge_id, code_digest = excluded.code_digest,
+    full_name = excluded.full_name, mobile_number = excluded.mobile_number, password_hash = excluded.password_hash,
+    attempts_left = 5, sent_at = excluded.sent_at, expires_at = excluded.expires_at
+  where applicant_signup_codes.sent_at <= now() - interval '30 seconds';
+  return found;
+end;
+$$;
+
+create or replace function public.consume_applicant_signup(challenge uuid, digest text)
+returns setof public.applicant_signup_codes language plpgsql as $$
+begin
+  update public.applicant_signup_codes set attempts_left = attempts_left - 1
+    where challenge_id = challenge and expires_at > now() and attempts_left > 0 and code_digest <> digest;
+  if found then return; end if;
+  return query delete from public.applicant_signup_codes
+    where challenge_id = challenge and expires_at > now() and attempts_left > 0 and code_digest = digest
+    returning *;
+end;
+$$;
+revoke all on function public.start_applicant_signup(text,uuid,text,text,text,text),
+  public.consume_applicant_signup(uuid,text) from public, anon, authenticated;
+grant execute on function public.start_applicant_signup(text,uuid,text,text,text,text),
+  public.consume_applicant_signup(uuid,text) to service_role;

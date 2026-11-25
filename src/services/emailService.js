@@ -4,6 +4,17 @@ const nodemailer = require("nodemailer");
  * Service to dispatch email notifications using Resend SMTP or configured SMTP
  */
 class EmailService {
+  static async sendSignupCode(email, code) {
+    const transporter = this.getTransporter();
+    if (!transporter) throw new Error("SMTP is not configured.");
+    await transporter.sendMail({
+      from: process.env.FROM_EMAIL || "info@maatram.tech",
+      to: { name: "", address: email },
+      subject: "Verify your Maatram application portal email",
+      text: "Enter " + code + " in the application portal to create your account. Registration expires 10 minutes after you start. If you did not request this code, you can ignore this email.",
+    });
+  }
+
   static async sendPostNotification(post) {
     const { supabaseAdmin } = require("../config/supabase");
     const { memberRole } = require("./membershipService");

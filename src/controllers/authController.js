@@ -1,5 +1,5 @@
 const { supabase, supabaseAdmin } = require("../config/supabase");
-const { generateNextApplicationNumber } = require("../utils/appNumberGenerator");
+const { randomUUID, randomInt, createHmac } = require("node:crypto");
 const { TwoFactorService } = require("../services/twoFactorService");
 const { EmailService } = require("../services/emailService");
 const { getMemberRole } = require("../services/membershipService");
@@ -34,6 +34,7 @@ async function sendOtp(req, res) {
   try {
     const { phone, email, type = "login", fullName, channel } = req.body;
 
+    if (type === "signup") return await resendSignupCode(req, res);
     if (!phone && !email) {
       return res.status(400).json({
         success: false,
@@ -54,6 +55,7 @@ async function sendOtp(req, res) {
       const { data, error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
+          shouldCreateUser: false,
           data: {
             full_name: fullName || "Student Applicant",
             phone: phone ? formatPhoneNumber(phone) : null,
@@ -64,31 +66,6 @@ async function sendOtp(req, res) {
 
       if (error) {
         console.error("Supabase email OTP error:", error.code || error.message);
-
-        // If free Supabase SMTP rate limit is exceeded (over_email_send_rate_limit)
-        if (
-          error.code === "over_email_send_rate_limit" ||
-          error.message?.toLowerCase().includes("rate limit") ||
-          error.status === 429
-        ) {
-          console.warn("⚠️ Supabase email rate limit exceeded. Enabling test OTP '123456'.");
-          console.warn("👉 In Supabase, connect custom SMTP (Resend/SendGrid) for unlimited emails.");
-
-          devOtpStore.set(cleanEmail, {
-            code: "123456",
-            fullName: fullName || "Student Applicant",
-            timestamp: Date.now(),
-          });
-
-          return res.status(200).json({
-            success: true,
-            message: `OTP generated for ${cleanEmail}. (Test OTP: 123456)`,
-            target: cleanEmail,
-            channel: "email",
-            type,
-            providerNotice: "Supabase free email rate limit reached. Use test OTP 123456 to verify.",
-          });
-        }
 
         return res.status(400).json({
           success: false,
@@ -113,6 +90,7 @@ async function sendOtp(req, res) {
       const { data, error } = await supabase.auth.signInWithOtp({
         phone: formattedPhone,
         options: {
+          shouldCreateUser: false,
           data: {
             full_name: fullName || "Student Applicant",
             role: "applicant",
@@ -122,34 +100,6 @@ async function sendOtp(req, res) {
 
       if (error) {
         console.error("Supabase phone OTP error:", error.code || error.message);
-
-        // If phone provider is disabled in Supabase console (code: 'phone_provider_disabled')
-        if (
-          error.code === "phone_provider_disabled" ||
-          error.message?.includes("Unsupported phone provider") ||
-          error.message?.includes("provider")
-        ) {
-          console.warn("⚠️ Phone provider disabled in Supabase. Enabling test OTP '123456'.");
-          console.warn(
-            "👉 Tip: Use Email OTP for instant delivery without Twilio."
-          );
-
-          devOtpStore.set(formattedPhone, {
-            code: "123456",
-            fullName: fullName || "Student Applicant",
-            timestamp: Date.now(),
-          });
-
-          return res.status(200).json({
-            success: true,
-            message: `OTP generated for ${formattedPhone}. (Test OTP: 123456)`,
-            target: formattedPhone,
-            channel: "phone",
-            type,
-            providerNotice:
-              "Phone provider requires Twilio. Email OTP is recommended for free instant delivery.",
-          });
-        }
 
         return res.status(400).json({
           success: false,
@@ -186,6 +136,7 @@ async function verifyOtp(req, res) {
   try {
     const { phone, email, token, type = "login", fullName, channel } = req.body;
 
+    if (type === "signup") return await completeSignup(req, res);
     if (!token || token.trim().length !== 6) {
       return res.status(400).json({
         success: false,
@@ -198,88 +149,6 @@ async function verifyOtp(req, res) {
       (type === "signup" && Boolean(email)) ||
       (!phone && Boolean(email));
 
-    const target = useEmail
-      ? email.trim().toLowerCase()
-      : phone
-      ? formatPhoneNumber(phone)
-      : email?.trim().toLowerCase();
-
-    // 1. Check fallback dev store
-    const devRecord = devOtpStore.get(target);
-    if (devRecord && (token.trim() === "123456" || token.trim() === devRecord.code)) {
-      console.log(`✅ Verified test OTP for ${target}`);
-
-      // Ensure user is created in Supabase Authentication tab (auth.users)
-      let supabaseUser = null;
-      try {
-        const { data: listData } = await supabaseAdmin.auth.admin.listUsers();
-        const found = listData?.users?.find(
-          (u) =>
-            (email && u.email === email.trim().toLowerCase()) ||
-            (phone && (u.phone === target || u.phone === target.replace("+", "")))
-        );
-
-        if (found) {
-          supabaseUser = found;
-        } else {
-          const createData = {
-            email_confirm: true,
-            phone_confirm: true,
-            user_metadata: {
-              full_name: fullName || devRecord.fullName || "Student Applicant",
-              role: "applicant",
-              phone: phone || null,
-            },
-          };
-          if (email) createData.email = email.trim().toLowerCase();
-          if (phone) createData.phone = formatPhoneNumber(phone);
-
-          const { data: created, error: createErr } =
-            await supabaseAdmin.auth.admin.createUser(createData);
-
-          if (!createErr && created?.user) {
-            supabaseUser = created.user;
-            console.log(
-              `✅ User created directly in Supabase Authentication tab: ${supabaseUser.id}`
-            );
-          } else {
-            console.warn("Could not create user in auth.users:", createErr?.message);
-          }
-        }
-      } catch (adminErr) {
-        console.warn("Admin auth check error:", adminErr.message);
-      }
-
-      const userId = supabaseUser
-        ? supabaseUser.id
-        : "user-" + Buffer.from(target).toString("hex").slice(0, 12);
-
-      const userPayload = {
-        id: userId,
-        email: email ? email.trim().toLowerCase() : (supabaseUser ? supabaseUser.email : null),
-        phone: phone || (supabaseUser ? supabaseUser.phone : null),
-        user_metadata: {
-          full_name: fullName || devRecord.fullName || "Student Applicant",
-          phone: phone || null,
-        },
-      };
-
-      // In dev fallback mode, we also avoid auto-creating empty placeholder drafts in applications table.
-      // An application record is created when the applicant fills and saves/submits the form.
-
-      return res.status(200).json({
-        success: true,
-        message: "OTP verified successfully. Authenticated into Supabase.",
-        session: {
-          access_token: "auth-token-" + Date.now(),
-          token_type: "bearer",
-          user: userPayload,
-        },
-        user: userPayload,
-      });
-    }
-
-    // 2. Real Supabase Verification
     let authResult;
     if (useEmail && email) {
       const cleanEmail = email.trim().toLowerCase();
@@ -368,10 +237,73 @@ async function verifyOtp(req, res) {
   }
 }
 
+function signupCode() {
+  return randomInt(1000000).toString().padStart(6, "0");
+}
+
+function signupDigest(id, code) {
+  return createHmac("sha256", process.env.SUPABASE_SERVICE_ROLE_KEY)
+    .update("signup:" + id + ":" + code).digest("hex");
+}
+
+async function deliverSignupCode(res, email, challengeId, code) {
+  try {
+    await EmailService.sendSignupCode(email, code);
+    return res.status(200).json({ success: true, challengeId });
+  } catch {
+    return res.status(503).json({ success: false, message: "We could not email your code. Please try again in 30 seconds." });
+  }
+}
+
+function signupChallenge(req) {
+  const id = req.body.challengeId;
+  return typeof id === "string" && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(id) ? id : null;
+}
+
+async function resendSignupCode(req, res) {
+  const id = signupChallenge(req);
+  if (!id) return res.status(400).json({ success: false, message: "Start registration again to request a code." });
+  const code = signupCode();
+  const now = Date.now();
+  const { data, error } = await supabaseAdmin.from("applicant_signup_codes")
+    .update({ code_digest: signupDigest(id, code), sent_at: new Date(now).toISOString() })
+    .eq("challenge_id", id).lt("sent_at", new Date(now - 30000).toISOString())
+    .gt("expires_at", new Date(now).toISOString()).gt("attempts_left", 0)
+    .select("email").maybeSingle();
+  if (error) throw error;
+  if (!data) return res.status(400).json({ success: false, message: "Wait 30 seconds between codes. If registration expired, start again." });
+  return deliverSignupCode(res, data.email, id, code);
+}
+
+async function completeSignup(req, res) {
+  const id = signupChallenge(req);
+  if (!id || typeof req.body.token !== "string" || !/^\d{6}$/.test(req.body.token)) {
+    return res.status(400).json({ success: false, message: "Enter the six-digit code from your registration email." });
+  }
+  const { data, error } = await supabaseAdmin.rpc("consume_applicant_signup", {
+    challenge: id, digest: signupDigest(id, req.body.token),
+  });
+  if (error) throw error;
+  const pending = data?.[0];
+  if (!pending) return res.status(400).json({ success: false, message: "Invalid or expired code. Use your latest email or start registration again." });
+  const { error: createError } = await supabaseAdmin.auth.admin.createUser({
+    email: pending.email, password_hash: pending.password_hash, email_confirm: true,
+    user_metadata: { full_name: pending.full_name, mobile_number: pending.mobile_number,
+      phone: formatPhoneNumber(pending.mobile_number), role: "applicant" },
+  });
+  if (createError) {
+    const exists = ["email_exists", "user_already_exists"].includes(createError.code);
+    return res.status(exists ? 409 : 503).json({ success: false, message: exists
+      ? "This email already has an account. Please sign in."
+      : "Account creation failed. Please start registration again." });
+  }
+  return res.status(201).json({ success: true });
+}
+
 /**
  * @controller  signup
  * @route       POST /auth/signup
- * @desc        Register a student with email, mobile, and password (No OTP required)
+ * @desc        Register a student with email, mobile, and password after email verification
  */
 async function signup(req, res) {
   try {
@@ -413,50 +345,18 @@ async function signup(req, res) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
-    const cleanPhone = formatPhoneNumber(mobileNumber.trim());
-
-    // 1. Create student in Supabase Auth (auth.users) with pre-confirmed email
-    const { data: createdUser, error: createError } =
-      await supabaseAdmin.auth.admin.createUser({
-        email: cleanEmail,
-        password: password,
-        email_confirm: true,
-        phone_confirm: true,
-        user_metadata: {
-          full_name: fullName.trim(),
-          phone: cleanPhone,
-          mobile_number: mobileNumber.trim(),
-          role: "applicant",
-        },
-      });
-
-    if (createError) {
-      // Check if user already exists
-      if (
-        createError.message?.toLowerCase().includes("already registered") ||
-        createError.message?.toLowerCase().includes("unique constraint") ||
-        createError.status === 422
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "An account with this email address already exists. Please sign in.",
-        });
-      }
-
-      console.error("Supabase createUser error:", createError);
-      return res.status(400).json({
-        success: false,
-        message: createError.message || "Failed to register student account",
-      });
+    if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(cleanEmail) || Buffer.byteLength(password) > 72) {
+      return res.status(400).json({ success: false, message: "Enter a valid email and a password of up to 72 bytes." });
     }
-
-    // Note: We do NOT insert an empty placeholder in the applications table on signup.
-    // The application will be created when the student actually fills and saves/submits their form.
-    return res.status(201).json({
-      success: true,
-      message: "Account created successfully! Please sign in with your credentials.",
-      user: createdUser?.user,
+    const challengeId = randomUUID();
+    const code = signupCode();
+    const { data, error } = await supabaseAdmin.rpc("start_applicant_signup", {
+      address: cleanEmail, challenge: challengeId, digest: signupDigest(challengeId, code),
+      applicant_name: fullName.trim(), mobile: mobileNumber.trim(), secret_password: password,
     });
+    if (error) throw error;
+    if (!data) return res.status(429).json({ success: false, message: "Wait 30 seconds before requesting another code." });
+    return deliverSignupCode(res, cleanEmail, challengeId, code);
   } catch (err) {
     console.error("signup controller error:", err);
     return res.status(500).json({
