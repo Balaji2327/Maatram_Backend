@@ -7,7 +7,7 @@ const { StorageService } = require("../services/storageService");
 
 const sections = {
   "College and enrollment": "collegeName degreeBranch currentYear rollNumber attendance cgpa",
-  "Personal details": "applicationNumber fullName submittedAt dob gender bloodGroup mobileNumber altMobileNumber whatsappNumber email aadhaarNumber community nationality maritalStatus",
+  "Personal details": "applicationNumber fullName submittedAt dob gender bloodGroup mobileNumber altMobileNumber whatsappNumber email aadhaarNumber community nationality",
   "Family and siblings": "fatherName fatherOccupation fatherAnnualIncome fatherEmploymentStatus motherName motherOccupation motherAnnualIncome motherEmploymentStatus annualIncome familyMembersCount familyType familySituation guardianName guardianRelation guardianOccupation guardianAnnualIncome siblingCount siblingsStudyingCount siblings",
   "Residence": "permanentAddress currentAddress sameAsPermanent villageTown district state pincode residenceType rentAmount collegeDistance",
   "Schooling": "tenthSchool tenthSchoolAddress tenthYear tenthBoard tenthSubjects tenthTotalMarks tenthMaxMarks tenthPercentage eleventhSchool eleventhSchoolAddress eleventhBoard eleventhStream eleventhPassYear eleventhSubjects eleventhTotalMarks eleventhMaxMarks eleventhPercentage twelfthSchool twelfthSchoolAddress twelfthYear twelfthBoard twelfthStream twelfthSubjects twelfthTotalMarks twelfthMaxMarks twelfthPercentage twelfthCutoff mediumOfInstruction",

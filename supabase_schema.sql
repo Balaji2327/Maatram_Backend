@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS public.applications (
     email VARCHAR(255),
     community VARCHAR(50), -- 'General / OC', 'BC', 'BCM', 'MBC / DNC', 'SC', 'SCA', 'ST'
     nationality VARCHAR(50) DEFAULT 'Indian',
-    marital_status VARCHAR(50) DEFAULT 'Single',
 
     -- Family Information
     father_name VARCHAR(255),
@@ -165,9 +164,6 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='nationality') THEN
         ALTER TABLE public.applications ADD COLUMN nationality VARCHAR(50) DEFAULT 'Indian';
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='marital_status') THEN
-        ALTER TABLE public.applications ADD COLUMN marital_status VARCHAR(50) DEFAULT 'Single';
     END IF;
 
     -- Family Information
@@ -618,7 +614,7 @@ ALTER TABLE public.applications
     ADD COLUMN IF NOT EXISTS engineering_cutoff NUMERIC(6, 2),
     ADD COLUMN IF NOT EXISTS paramedical_cutoff NUMERIC(6, 2);
 
--- Retire optional admission uploads from existing installations.
+-- Retire marital status and optional admission uploads from existing installations.
 BEGIN;
 CREATE FUNCTION pg_temp.retained_application_remarks(remarks text) RETURNS text
 LANGUAGE plpgsql IMMUTABLE STRICT AS $$
@@ -628,7 +624,7 @@ DECLARE
 BEGIN
     original := remarks::jsonb;
     IF jsonb_typeof(original) = 'object' THEN
-        retained := original - ARRAY['document11thMarksheet', 'documentCommunityCertificate',
+        retained := original - ARRAY['maritalStatus', 'marital_status', 'document11thMarksheet', 'documentCommunityCertificate',
             'documentIncomeCertificate', 'documentParentIdProof', 'document_11th_marksheet',
             'document_community_certificate', 'document_income_certificate', 'document_parent_id_proof'];
         IF retained IS DISTINCT FROM original THEN RETURN retained::text; END IF;
@@ -640,9 +636,13 @@ $$;
 UPDATE public.applications SET additional_remarks = pg_temp.retained_application_remarks(additional_remarks)
 WHERE additional_remarks IS DISTINCT FROM pg_temp.retained_application_remarks(additional_remarks);
 ALTER TABLE public.applications
+    DROP COLUMN IF EXISTS marital_status,
     DROP COLUMN IF EXISTS document_11th_marksheet,
     DROP COLUMN IF EXISTS document_community_certificate,
     DROP COLUMN IF EXISTS document_income_certificate,
     DROP COLUMN IF EXISTS document_parent_id_proof;
+UPDATE auth.users
+SET raw_user_meta_data = raw_user_meta_data - ARRAY['scholar_maritalStatus', 'maritalStatus', 'marital_status']
+WHERE raw_user_meta_data ?| ARRAY['scholar_maritalStatus', 'maritalStatus', 'marital_status'];
 DROP FUNCTION pg_temp.retained_application_remarks(text);
 COMMIT;

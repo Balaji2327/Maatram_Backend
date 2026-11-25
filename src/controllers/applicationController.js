@@ -52,7 +52,6 @@ const admissionColumns = {
   whatsappNumber: "whatsapp_number",
   community: "community",
   nationality: "nationality",
-  maritalStatus: "marital_status",
   fatherEmploymentStatus: "father_employment_status",
   motherEmploymentStatus: "mother_employment_status",
   familyMembersCount: "family_members_count",
@@ -95,7 +94,6 @@ function mapFormDataToDb(formData) {
     whatsappNumber: formData.whatsappNumber || "",
     community: formData.community || "",
     nationality: formData.nationality || "Indian",
-    maritalStatus: formData.maritalStatus || "Single",
     fatherEmploymentStatus: formData.fatherEmploymentStatus || "",
     motherEmploymentStatus: formData.motherEmploymentStatus || "",
     familyMembersCount: formData.familyMembersCount || "",
@@ -266,7 +264,6 @@ function mapDbToFormData(record) {
     aadhaarNumber: row.aadhaar_number || "",
     community: ext.community || "",
     nationality: ext.nationality || "",
-    maritalStatus: ext.maritalStatus || "",
 
     // B. Family Information
     fatherName: row.father_name || "",

@@ -38,7 +38,7 @@ function applicationReview(row) {
   return [
     section("Personal details", { applicationNumber: "Application number", fullName: "Full name", dob: "Date of birth", gender: "Gender",
       bloodGroup: "Blood group", mobileNumber: "Mobile", whatsappNumber: "WhatsApp", altMobileNumber: "Alternate mobile",
-      email: "Email", aadhaarNumber: "Aadhaar number", community: "Community", nationality: "Nationality", maritalStatus: "Marital status" }),
+      email: "Email", aadhaarNumber: "Aadhaar number", community: "Community", nationality: "Nationality" }),
     section("Family details", { fatherName: "Father's name", fatherOccupation: "Father's occupation", fatherEmploymentStatus: "Father's employment status",
       fatherAnnualIncome: "Father's annual income", motherName: "Mother's name", motherOccupation: "Mother's occupation",
       motherEmploymentStatus: "Mother's employment status", motherAnnualIncome: "Mother's annual income", guardianName: "Guardian's name",
