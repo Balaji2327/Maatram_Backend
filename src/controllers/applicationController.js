@@ -86,6 +86,7 @@ const admissionColumns = {
 };
 
 function mapFormDataToDb(formData) {
+  const currentAddress = formData.sameAsPermanent ? (formData.permanentAddress || formData.address) : formData.currentAddress;
   // Extract and serialize any extended fields into additional_remarks JSON wrapper
   const extendedData = {
     state: formData.state, tenthSubjects: formData.tenthSubjects, mediumOfInstruction: formData.mediumOfInstruction,
@@ -103,7 +104,7 @@ function mapFormDataToDb(formData) {
     siblingCount: formData.siblingCount || "",
     siblingsStudyingCount: formData.siblingsStudyingCount || "",
     permanentAddress: formData.permanentAddress || "",
-    currentAddress: formData.currentAddress || "",
+    currentAddress: currentAddress || "",
     sameAsPermanent: formData.sameAsPermanent ?? false,
     villageTown: formData.villageTown || "",
     residenceType: formData.residenceType || "",
@@ -124,7 +125,6 @@ function mapFormDataToDb(formData) {
     willingToRelocateTN: formData.willingToRelocateTN ?? true,
     futureGoals: formData.futureGoals || "",
     studentPhoto: formData.studentPhoto || "",
-    customRemarks: formData.additionalRemarks || "",
   };
 
   return {
@@ -140,7 +140,8 @@ function mapFormDataToDb(formData) {
     mobile_number: formData.mobileNumber,
     alt_mobile_number: formData.altMobileNumber ?? null,
     email: formData.email,
-    address: (formData.sameAsPermanent ? formData.permanentAddress : formData.currentAddress) || formData.permanentAddress || formData.address,
+    current_address: currentAddress,
+    address: currentAddress || formData.permanentAddress || formData.address,
     district: formData.district,
     pincode: formData.pincode,
 
@@ -196,8 +197,6 @@ function mapFormDataToDb(formData) {
     twelfth_max_marks: formData.twelfthMaxMarks ? parseFloat(formData.twelfthMaxMarks) : null,
     twelfth_percentage: formData.twelfthPercentage ? parseFloat(formData.twelfthPercentage) : null,
     twelfth_cutoff: formData.twelfthCutoff ? parseFloat(formData.twelfthCutoff) : null,
-    engineering_cutoff: formData.engineeringCutoff || null,
-    paramedical_cutoff: formData.paramedicalCutoff || null,
 
     // Preferences
     preferred_degree: formData.preferredDegree,
@@ -295,8 +294,8 @@ function mapDbToFormData(record) {
 
     // D. Address Information
     permanentAddress: ext.permanentAddress ?? row.address ?? "",
-    currentAddress: ext.currentAddress ?? row.address ?? "",
-    sameAsPermanent: ext.sameAsPermanent ?? true,
+    currentAddress: (ext.sameAsPermanent ? ext.permanentAddress : ext.currentAddress) ?? row.address ?? "",
+    sameAsPermanent: ext.sameAsPermanent ?? (!ext.currentAddress || ext.currentAddress === (ext.permanentAddress || row.address)),
     address: row.address || "",
     villageTown: ext.villageTown || "",
     district: row.district || "",
@@ -371,7 +370,6 @@ function mapDbToFormData(record) {
     careerAmbition: ext.careerAmbition || "",
     willingToRelocateTN: yesNo(ext.willingToRelocateTN ?? row.willing_to_relocate_tn),
     futureGoals: ext.futureGoals || "",
-    additionalRemarks: ext.customRemarks || "",
 
     // H. Document Uploads (Resolved to streamable URLs, preserving S3 keys)
     studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),

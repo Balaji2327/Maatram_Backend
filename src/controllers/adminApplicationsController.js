@@ -49,7 +49,7 @@ function applicationReview(row) {
       currentAddress: "Current address", villageTown: "Village or town", district: "District", state: "State", pincode: "PIN code",
       residenceType: "Residence type", rentAmount: "Rent", collegeDistance: "Distance to college" }),
     schooling("tenth", "Class 10 marks"), schooling("eleventh", "Class 11 marks"), schooling("twelfth", "Class 12 marks"),
-    section("Higher education preferences", { mediumOfInstruction: "Medium of instruction", twelfthCutoff: "Admission cutoff",
+    section("Higher education preferences", { mediumOfInstruction: "Medium of instruction",
       engineeringCutoff: "Engineering cutoff", paramedicalCutoff: "Paramedical cutoff", firstGraduate: "First-generation graduate",
       preferredDegree: "Preferred degree", preferredBranch: "First course preference", secondBranch: "Second course preference",
       preferredCollegeLocation: "Preferred college or location", hostelRequired: "Hostel required", careerGoal: "Career goal" }),
@@ -57,7 +57,7 @@ function applicationReview(row) {
       financialDifficulties: "Financial difficulties", whyNeedSupport: "Reason for requesting support", affordabilityWithoutSupport: "Ability to afford college without support" }),
     section("Background and goals", { orphan: "Orphan status", singleParent: "Single-parent status", firstGenerationLearner: "First-generation learner",
       specialCircumstances: "Special family circumstances", careerAmbition: "Career ambition", willingToRelocateTN: "Willing to relocate in Tamil Nadu",
-      futureGoals: "Future goals", additionalRemarks: "Additional remarks", declarationAgreed: "Applicant declaration agreed" }),
+      futureGoals: "Future goals", declarationAgreed: "Applicant declaration agreed" }),
   ];
 }
 

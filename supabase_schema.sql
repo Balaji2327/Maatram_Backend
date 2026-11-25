@@ -646,3 +646,57 @@ SET raw_user_meta_data = raw_user_meta_data - ARRAY['scholar_maritalStatus', 'ma
 WHERE raw_user_meta_data ?| ARRAY['scholar_maritalStatus', 'maritalStatus', 'marital_status'];
 DROP FUNCTION pg_temp.retained_application_remarks(text);
 COMMIT;
+
+-- Recalculate cutoff scores from saved Class 12 marks.
+BEGIN;
+CREATE OR REPLACE FUNCTION public.application_cutoffs(subjects jsonb)
+RETURNS TABLE(engineering numeric, paramedical numeric)
+LANGUAGE sql IMMUTABLE AS $$
+    WITH entries AS (
+        SELECT lower(coalesce(s->>'subjectName', s->>'name', s->>'subject')) AS name,
+               trim(coalesce(s->>'marksObtained', s->>'marks')) AS obtained,
+               coalesce(nullif(trim(coalesce(s->>'maxMarks', s->>'max_marks')), ''), '100') AS maximum,
+               ord
+        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(subjects) = 'array' THEN subjects ELSE '[]'::jsonb END)
+             WITH ORDINALITY AS e(s, ord)
+    ), scores AS (
+        SELECT name, ord, CASE WHEN obtained ~ '^[0-9]{1,6}([.][0-9]{1,6})?$'
+                                AND maximum ~ '^[0-9]{1,6}([.][0-9]{1,6})?$'
+                               THEN CASE WHEN obtained::numeric <= maximum::numeric
+                                         THEN obtained::numeric * 100 / nullif(maximum::numeric, 0) END
+                          END AS score
+        FROM entries
+    ), core AS (
+        SELECT (array_agg(score ORDER BY ord) FILTER (WHERE name LIKE '%math%'))[1] AS maths,
+               (array_agg(score ORDER BY ord) FILTER (WHERE name LIKE '%phys%'))[1] AS physics,
+               (array_agg(score ORDER BY ord) FILTER (WHERE name LIKE '%chem%'))[1] AS chemistry,
+               (array_agg(score ORDER BY ord) FILTER (WHERE name LIKE '%bio%'))[1] AS biology,
+               (array_agg(score ORDER BY ord) FILTER (WHERE name LIKE '%botan%'))[1] AS botany,
+               (array_agg(score ORDER BY ord) FILTER (WHERE name LIKE '%zool%'))[1] AS zoology
+        FROM scores
+    )
+    SELECT round(maths + (physics + chemistry) / 2, 2),
+           round(coalesce(biology, (botany + zoology) / 2, botany, zoology) + (physics + chemistry) / 2, 2)
+    FROM core;
+$$;
+CREATE OR REPLACE FUNCTION public.set_application_cutoffs() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    SELECT engineering, paramedical INTO NEW.engineering_cutoff, NEW.paramedical_cutoff
+    FROM public.application_cutoffs(NEW.twelfth_subjects);
+    RETURN NEW;
+END;
+$$;
+DROP TRIGGER IF EXISTS calculate_application_cutoffs ON public.applications;
+CREATE TRIGGER calculate_application_cutoffs
+BEFORE INSERT OR UPDATE OF twelfth_subjects, engineering_cutoff, paramedical_cutoff ON public.applications
+FOR EACH ROW EXECUTE FUNCTION public.set_application_cutoffs();
+
+WITH calculated AS (
+    SELECT a.id, c.* FROM public.applications a
+    CROSS JOIN LATERAL public.application_cutoffs(a.twelfth_subjects) c
+    WHERE jsonb_typeof(a.twelfth_subjects) = 'array' AND a.twelfth_subjects <> '[]'::jsonb
+)
+UPDATE public.applications a SET engineering_cutoff = c.engineering, paramedical_cutoff = c.paramedical
+FROM calculated c WHERE c.id = a.id AND (a.engineering_cutoff, a.paramedical_cutoff)
+    IS DISTINCT FROM (c.engineering, c.paramedical);
+COMMIT;
