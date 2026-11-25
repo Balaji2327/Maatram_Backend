@@ -52,12 +52,8 @@ function applicationReview(row) {
     section("Higher education preferences", { mediumOfInstruction: "Medium of instruction",
       engineeringCutoff: "Engineering cutoff", paramedicalCutoff: "Paramedical cutoff", firstGraduate: "First-generation graduate",
       preferredDegree: "Preferred degree", preferredBranch: "First course preference", secondBranch: "Second course preference",
-      preferredCollegeLocation: "Preferred college or location", hostelRequired: "Hostel required", careerGoal: "Career goal" }),
-    section("Financial information", { incomeSources: "Income sources", familyDebts: "Family debts", educationLoans: "Education loans",
-      financialDifficulties: "Financial difficulties", whyNeedSupport: "Reason for requesting support", affordabilityWithoutSupport: "Ability to afford college without support" }),
-    section("Background and goals", { orphan: "Orphan status", singleParent: "Single-parent status", firstGenerationLearner: "First-generation learner",
-      specialCircumstances: "Special family circumstances", careerAmbition: "Career ambition", willingToRelocateTN: "Willing to relocate in Tamil Nadu",
-      futureGoals: "Future goals", declarationAgreed: "Applicant declaration agreed" }),
+      preferredCollegeLocation: "Preferred college or location", hostelRequired: "Hostel required", careerGoal: "Career goal",
+      declarationAgreed: "Applicant declaration agreed" }),
   ];
 }
 
@@ -148,7 +144,6 @@ async function getAllApplications(req, res) {
         ...ext,
         reviewSections: applicationReview(app),
         family_annual_income: familyAnnualIncome(app, ext),
-        whyNeedSupport: ext.whyNeedSupport || app.whyNeedSupport || ext.why_scholarship || app.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || app.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
         volunteer_name: ext.volunteer_name || app.volunteer_name || ext.tele_volunteer_name || "",
         tele_volunteer_name: ext.tele_volunteer_name || ext.volunteer_name || app.volunteer_name || "",
@@ -275,7 +270,6 @@ async function getApplicationById(req, res) {
         ...ext,
         reviewSections: applicationReview(application),
         family_annual_income: familyAnnualIncome(application, ext),
-        whyNeedSupport: ext.whyNeedSupport || application.whyNeedSupport || ext.why_scholarship || application.why_scholarship,
         volunteer_suggestion: ext.volunteer_suggestion || application.volunteer_suggestion || ext.tele_volunteer_suggestion || "",
         volunteer_name: ext.volunteer_name || application.volunteer_name || ext.tele_volunteer_name || "",
         tele_volunteer_name: ext.tele_volunteer_name || ext.volunteer_name || application.volunteer_name || "",

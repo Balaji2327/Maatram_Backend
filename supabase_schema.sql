@@ -116,26 +116,11 @@ CREATE TABLE IF NOT EXISTS public.applications (
     preferred_college_location VARCHAR(255),
     hostel_required BOOLEAN DEFAULT false,
 
-    -- Financial Information
-    income_sources TEXT,
-    family_debts TEXT,
-    education_loans TEXT,
-    financial_difficulties TEXT,
-    why_need_support TEXT,
-    affordability_without_support TEXT,
-
-    -- Personal & Background Information
-    first_generation_learner BOOLEAN DEFAULT false,
-    special_circumstances TEXT,
-    career_ambition TEXT,
-    willing_to_relocate_tn BOOLEAN DEFAULT true,
-    future_goals TEXT,
     same_as_permanent BOOLEAN,
     eleventh_stream TEXT,
     medium_of_instruction TEXT,
     declaration_agreed BOOLEAN,
     career_goal TEXT,
-    single_parent_status TEXT,
     additional_remarks TEXT,
     
     -- Documents (AWS S3 Object Keys / URLs)
@@ -228,43 +213,8 @@ BEGIN
         ALTER TABLE public.applications ADD COLUMN preferred_college_location VARCHAR(255);
     END IF;
 
-    -- Financial Information
+    -- Financial Information (only annual income kept in Family)
     ALTER TABLE public.applications ADD COLUMN IF NOT EXISTS family_annual_income VARCHAR(50);
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='income_sources') THEN
-        ALTER TABLE public.applications ADD COLUMN income_sources TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='family_debts') THEN
-        ALTER TABLE public.applications ADD COLUMN family_debts TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='education_loans') THEN
-        ALTER TABLE public.applications ADD COLUMN education_loans TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='financial_difficulties') THEN
-        ALTER TABLE public.applications ADD COLUMN financial_difficulties TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='why_need_support') THEN
-        ALTER TABLE public.applications ADD COLUMN why_need_support TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='affordability_without_support') THEN
-        ALTER TABLE public.applications ADD COLUMN affordability_without_support TEXT;
-    END IF;
-
-    -- Personal & Background Information
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='first_generation_learner') THEN
-        ALTER TABLE public.applications ADD COLUMN first_generation_learner BOOLEAN DEFAULT false;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='special_circumstances') THEN
-        ALTER TABLE public.applications ADD COLUMN special_circumstances TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='career_ambition') THEN
-        ALTER TABLE public.applications ADD COLUMN career_ambition TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='willing_to_relocate_tn') THEN
-        ALTER TABLE public.applications ADD COLUMN willing_to_relocate_tn BOOLEAN DEFAULT true;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='future_goals') THEN
-        ALTER TABLE public.applications ADD COLUMN future_goals TEXT;
-    END IF;
 
     -- Documents
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='student_photo') THEN
@@ -610,7 +560,6 @@ ALTER TABLE public.applications
     ADD COLUMN IF NOT EXISTS medium_of_instruction TEXT,
     ADD COLUMN IF NOT EXISTS declaration_agreed BOOLEAN,
     ADD COLUMN IF NOT EXISTS career_goal TEXT,
-    ADD COLUMN IF NOT EXISTS single_parent_status TEXT,
     ADD COLUMN IF NOT EXISTS engineering_cutoff NUMERIC(6, 2),
     ADD COLUMN IF NOT EXISTS paramedical_cutoff NUMERIC(6, 2);
 
@@ -699,4 +648,68 @@ WITH calculated AS (
 UPDATE public.applications a SET engineering_cutoff = c.engineering, paramedical_cutoff = c.paramedical
 FROM calculated c WHERE c.id = a.id AND (a.engineering_cutoff, a.paramedical_cutoff)
     IS DISTINCT FROM (c.engineering, c.paramedical);
+COMMIT;
+
+-- Retire Financial and Background tab fields from existing installations.
+ALTER TABLE public.applications
+    DROP COLUMN IF EXISTS income_sources,
+    DROP COLUMN IF EXISTS family_debts,
+    DROP COLUMN IF EXISTS education_loans,
+    DROP COLUMN IF EXISTS financial_difficulties,
+    DROP COLUMN IF EXISTS why_need_support,
+    DROP COLUMN IF EXISTS affordability_without_support,
+    DROP COLUMN IF EXISTS first_generation_learner,
+    DROP COLUMN IF EXISTS special_circumstances,
+    DROP COLUMN IF EXISTS career_ambition,
+    DROP COLUMN IF EXISTS willing_to_relocate_tn,
+    DROP COLUMN IF EXISTS future_goals,
+    DROP COLUMN IF EXISTS single_parent_status;
+
+-- Retire Financial and Background tab fields from existing installations.
+BEGIN;
+CREATE FUNCTION pg_temp.without_financial_background(remarks text) RETURNS text
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE
+    original jsonb;
+    retained jsonb;
+BEGIN
+    original := remarks::jsonb;
+    IF jsonb_typeof(original) = 'object' THEN
+        retained := original - ARRAY[
+            'incomeSources', 'income_sources',
+            'familyDebts', 'family_debts',
+            'educationLoans', 'education_loans',
+            'financialDifficulties', 'financial_difficulties',
+            'whyNeedSupport', 'why_need_support',
+            'affordabilityWithoutSupport', 'affordability_without_support',
+            'orphan',
+            'singleParent', 'single_parent', 'single_parent_status',
+            'firstGenerationLearner', 'first_generation_learner',
+            'specialCircumstances', 'special_circumstances',
+            'careerAmbition', 'career_ambition',
+            'willingToRelocateTN', 'willing_to_relocate_tn',
+            'futureGoals', 'future_goals'
+        ];
+        IF retained IS DISTINCT FROM original THEN RETURN retained::text; END IF;
+    END IF;
+    RETURN remarks;
+EXCEPTION WHEN invalid_text_representation THEN RETURN remarks;
+END;
+$$;
+UPDATE public.applications SET additional_remarks = pg_temp.without_financial_background(additional_remarks)
+WHERE additional_remarks IS DISTINCT FROM pg_temp.without_financial_background(additional_remarks);
+ALTER TABLE public.applications
+    DROP COLUMN IF EXISTS income_sources,
+    DROP COLUMN IF EXISTS family_debts,
+    DROP COLUMN IF EXISTS education_loans,
+    DROP COLUMN IF EXISTS financial_difficulties,
+    DROP COLUMN IF EXISTS why_need_support,
+    DROP COLUMN IF EXISTS affordability_without_support,
+    DROP COLUMN IF EXISTS first_generation_learner,
+    DROP COLUMN IF EXISTS special_circumstances,
+    DROP COLUMN IF EXISTS career_ambition,
+    DROP COLUMN IF EXISTS willing_to_relocate_tn,
+    DROP COLUMN IF EXISTS future_goals,
+    DROP COLUMN IF EXISTS single_parent_status;
+DROP FUNCTION pg_temp.without_financial_background(text);
 COMMIT;

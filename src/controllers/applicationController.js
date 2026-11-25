@@ -72,15 +72,6 @@ const admissionColumns = {
   secondBranch: "second_branch",
   preferredCollegeLocation: "preferred_college_location",
   careerGoal: "career_goal",
-  incomeSources: "income_sources",
-  familyDebts: "family_debts",
-  educationLoans: "education_loans",
-  financialDifficulties: "financial_difficulties",
-  whyNeedSupport: "why_need_support",
-  affordabilityWithoutSupport: "affordability_without_support",
-  specialCircumstances: "special_circumstances",
-  careerAmbition: "career_ambition",
-  futureGoals: "future_goals",
   declarationAgreed: "declaration_agreed",
   studentPhoto: "student_photo",
 };
@@ -91,7 +82,6 @@ function mapFormDataToDb(formData) {
   const extendedData = {
     state: formData.state, tenthSubjects: formData.tenthSubjects, mediumOfInstruction: formData.mediumOfInstruction,
     declarationAgreed: formData.declarationAgreed, eleventhStream: formData.eleventhStream, careerGoal: formData.careerGoal,
-    firstGenerationLearner: formData.firstGenerationLearner,
     whatsappNumber: formData.whatsappNumber || "",
     community: formData.community || "",
     nationality: formData.nationality || "Indian",
@@ -113,25 +103,11 @@ function mapFormDataToDb(formData) {
     firstGraduate: formData.firstGraduate ?? false,
     secondBranch: formData.secondBranch || "",
     preferredCollegeLocation: formData.preferredCollegeLocation || "",
-
-    incomeSources: formData.incomeSources || "",
-    familyDebts: formData.familyDebts || "",
-    educationLoans: formData.educationLoans || "",
-    financialDifficulties: formData.financialDifficulties || "",
-    whyNeedSupport: formData.whyNeedSupport || "",
-    affordabilityWithoutSupport: formData.affordabilityWithoutSupport || "",
-    specialCircumstances: formData.specialCircumstances || "",
-    careerAmbition: formData.careerAmbition || "",
-    willingToRelocateTN: formData.willingToRelocateTN ?? true,
-    futureGoals: formData.futureGoals || "",
     studentPhoto: formData.studentPhoto || "",
   };
 
   return {
     ...Object.fromEntries(Object.entries(admissionColumns).map(([field, column]) => [column, formData[field]])),
-    first_generation_learner: formData.firstGenerationLearner == null ? undefined : yes(formData.firstGenerationLearner),
-    willing_to_relocate_tn: formData.willingToRelocateTN == null ? undefined : yes(formData.willingToRelocateTN),
-    single_parent_status: typeof formData.singleParent === "string" ? formData.singleParent : undefined,
     full_name: formData.fullName,
     dob: formData.dob || null,
     gender: formData.gender,
@@ -352,24 +328,6 @@ function mapDbToFormData(record) {
     preferredCollegeLocation: ext.preferredCollegeLocation || (row.preferred_districts && row.preferred_districts[0]) || "",
     preferredDistricts: row.preferred_districts || [],
     hostelRequired: yesNo(row.hostel_required),
-
-    // F. Financial Information
-    incomeSources: ext.incomeSources || "",
-    familyDebts: ext.familyDebts || "",
-    educationLoans: ext.educationLoans || "",
-    financialDifficulties: ext.financialDifficulties || "",
-    whyNeedSupport: ext.whyNeedSupport || "",
-    affordabilityWithoutSupport: ext.affordabilityWithoutSupport || "",
-
-    // G. Personal and Background Information
-    orphan: yesNo(row.orphan ?? (ext.familySituation === "Orphan")),
-    singleParent: row.single_parent_status ?? (row.single_parent ? "Yes" : "No"),
-    firstGenerationLearner: yesNo(ext.firstGenerationLearner ?? row.first_generation_learner ?? row.first_graduate ?? ext.firstGraduate),
-    differentlyAbled: row.differently_abled ?? false,
-    specialCircumstances: ext.specialCircumstances || "",
-    careerAmbition: ext.careerAmbition || "",
-    willingToRelocateTN: yesNo(ext.willingToRelocateTN ?? row.willing_to_relocate_tn),
-    futureGoals: ext.futureGoals || "",
 
     // H. Document Uploads (Resolved to streamable URLs, preserving S3 keys)
     studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
