@@ -38,6 +38,9 @@ function requireSignedAdmin(req, res, next) {
 router.patch("/applications/:id/status", requireSignedAdmin, adminController.updateApplicationStatus);
 router.patch("/applications/:id/assign-volunteer", adminController.assignVolunteer);
 router.patch("/applications/:id/volunteer-suggestion", adminController.updateVolunteerSuggestion);
+router.post("/applications/:id/suggestion-transcript/:phase", authenticateToken,
+  express.raw({ type: ["audio/webm", "audio/ogg", "audio/mp4"], limit: "3mb" }),
+  require("../controllers/suggestionTranscript"));
 router.post("/applications/bulk-volunteer-suggestions", adminController.bulkUpdateVolunteerSuggestions);
 router.delete("/applications/:id", adminController.deleteApplication);
 
