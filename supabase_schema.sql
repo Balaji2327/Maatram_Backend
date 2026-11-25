@@ -142,12 +142,8 @@ CREATE TABLE IF NOT EXISTS public.applications (
     -- Documents (AWS S3 Object Keys / URLs)
     student_photo TEXT,
     document_10th_marksheet TEXT,
-    document_11th_marksheet TEXT,
     document_12th_marksheet TEXT,
-    document_community_certificate TEXT,
-    document_income_certificate TEXT,
     document_aadhaar_card TEXT,
-    document_parent_id_proof TEXT,
     
     -- Timestamps
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -277,15 +273,6 @@ BEGIN
     -- Documents
     IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='student_photo') THEN
         ALTER TABLE public.applications ADD COLUMN student_photo TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='document_community_certificate') THEN
-        ALTER TABLE public.applications ADD COLUMN document_community_certificate TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='document_income_certificate') THEN
-        ALTER TABLE public.applications ADD COLUMN document_income_certificate TEXT;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='applications' AND column_name='document_parent_id_proof') THEN
-        ALTER TABLE public.applications ADD COLUMN document_parent_id_proof TEXT;
     END IF;
 END $$;
 
@@ -630,3 +617,32 @@ ALTER TABLE public.applications
     ADD COLUMN IF NOT EXISTS single_parent_status TEXT,
     ADD COLUMN IF NOT EXISTS engineering_cutoff NUMERIC(6, 2),
     ADD COLUMN IF NOT EXISTS paramedical_cutoff NUMERIC(6, 2);
+
+-- Retire optional admission uploads from existing installations.
+BEGIN;
+CREATE FUNCTION pg_temp.retained_application_remarks(remarks text) RETURNS text
+LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE
+    original jsonb;
+    retained jsonb;
+BEGIN
+    original := remarks::jsonb;
+    IF jsonb_typeof(original) = 'object' THEN
+        retained := original - ARRAY['document11thMarksheet', 'documentCommunityCertificate',
+            'documentIncomeCertificate', 'documentParentIdProof', 'document_11th_marksheet',
+            'document_community_certificate', 'document_income_certificate', 'document_parent_id_proof'];
+        IF retained IS DISTINCT FROM original THEN RETURN retained::text; END IF;
+    END IF;
+    RETURN remarks;
+EXCEPTION WHEN invalid_text_representation THEN RETURN remarks;
+END;
+$$;
+UPDATE public.applications SET additional_remarks = pg_temp.retained_application_remarks(additional_remarks)
+WHERE additional_remarks IS DISTINCT FROM pg_temp.retained_application_remarks(additional_remarks);
+ALTER TABLE public.applications
+    DROP COLUMN IF EXISTS document_11th_marksheet,
+    DROP COLUMN IF EXISTS document_community_certificate,
+    DROP COLUMN IF EXISTS document_income_certificate,
+    DROP COLUMN IF EXISTS document_parent_id_proof;
+DROP FUNCTION pg_temp.retained_application_remarks(text);
+COMMIT;

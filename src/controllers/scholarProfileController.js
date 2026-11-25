@@ -13,7 +13,7 @@ const sections = {
   "Schooling": "tenthSchool tenthSchoolAddress tenthYear tenthBoard tenthSubjects tenthTotalMarks tenthMaxMarks tenthPercentage eleventhSchool eleventhSchoolAddress eleventhBoard eleventhStream eleventhPassYear eleventhSubjects eleventhTotalMarks eleventhMaxMarks eleventhPercentage twelfthSchool twelfthSchoolAddress twelfthYear twelfthBoard twelfthStream twelfthSubjects twelfthTotalMarks twelfthMaxMarks twelfthPercentage twelfthCutoff mediumOfInstruction",
   "Study preferences": "preferredDegree preferredBranch secondBranch preferredCourses preferredCollegeLocation preferredDistricts hostelRequired firstGraduate careerGoal",
   "Finances and goals": "incomeSources familyDebts educationLoans affordabilityWithoutSupport financialDifficulties whyNeedSupport orphan singleParent firstGenerationLearner differentlyAbled specialCircumstances careerAmbition willingToRelocateTN futureGoals additionalRemarks declarationAgreed",
-  "Application documents": "studentPhoto document10thMarksheet document11thMarksheet document12thMarksheet documentCommunityCertificate documentIncomeCertificate documentAadhaarCard documentParentIdProof",
+  "Application documents": "studentPhoto document10thMarksheet document12thMarksheet documentAadhaarCard",
 };
 const fields = Object.values(sections).flatMap(group => group.split(" "));
 const readOnly = new Set(("applicationNumber submittedAt email cgpa declarationAgreed tenthSubjects eleventhSubjects twelfthSubjects preferredCourses preferredDistricts " + sections["Application documents"]).split(" "));

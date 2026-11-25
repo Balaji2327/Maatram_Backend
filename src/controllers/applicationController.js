@@ -23,7 +23,7 @@ async function processDocumentUpload(docVal, fieldName) {
 }
 
 /**
- * Resolves all 7 document fields from base64 into AWS S3 keys
+ * Resolves the four application uploads from base64 into AWS S3 keys
  */
 async function uploadAllApplicationDocuments(formData) {
   if (!formData || typeof formData !== "object") return formData;
@@ -32,12 +32,8 @@ async function uploadAllApplicationDocuments(formData) {
   const docFields = [
     { key: "studentPhoto", name: "student_photo" },
     { key: "document10thMarksheet", name: "10th_marksheet" },
-    { key: "document11thMarksheet", name: "11th_marksheet" },
     { key: "document12thMarksheet", name: "12th_marksheet" },
-    { key: "documentCommunityCertificate", name: "community_cert" },
-    { key: "documentIncomeCertificate", name: "income_cert" },
     { key: "documentAadhaarCard", name: "aadhaar_doc" },
-    { key: "documentParentIdProof", name: "parent_id_proof" },
   ];
 
   const uploads = docFields.filter(({ key }) => processed[key]?.startsWith?.("data:"));
@@ -87,9 +83,6 @@ const admissionColumns = {
   careerAmbition: "career_ambition",
   futureGoals: "future_goals",
   declarationAgreed: "declaration_agreed",
-  documentCommunityCertificate: "document_community_certificate",
-  documentIncomeCertificate: "document_income_certificate",
-  documentParentIdProof: "document_parent_id_proof",
   studentPhoto: "student_photo",
 };
 
@@ -132,9 +125,6 @@ function mapFormDataToDb(formData) {
     careerAmbition: formData.careerAmbition || "",
     willingToRelocateTN: formData.willingToRelocateTN ?? true,
     futureGoals: formData.futureGoals || "",
-    documentCommunityCertificate: formData.documentCommunityCertificate || "",
-    documentIncomeCertificate: formData.documentIncomeCertificate || "",
-    documentParentIdProof: formData.documentParentIdProof || "",
     studentPhoto: formData.studentPhoto || "",
     customRemarks: formData.additionalRemarks || "",
   };
@@ -221,7 +211,6 @@ function mapFormDataToDb(formData) {
 
     // Documents
     document_10th_marksheet: formData.document10thMarksheet,
-    document_11th_marksheet: formData.document11thMarksheet,
     document_12th_marksheet: formData.document12thMarksheet,
     document_aadhaar_card: formData.documentAadhaarCard || formData.documentAadhaar,
   };
@@ -390,22 +379,14 @@ function mapDbToFormData(record) {
     // H. Document Uploads (Resolved to streamable URLs, preserving S3 keys)
     studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
     document10thMarksheet: StorageService.getMediaUrl(row.document_10th_marksheet || ""),
-    document11thMarksheet: StorageService.getMediaUrl(row.document_11th_marksheet || ""),
     document12thMarksheet: StorageService.getMediaUrl(row.document_12th_marksheet || ""),
-    documentCommunityCertificate: StorageService.getMediaUrl(ext.documentCommunityCertificate || ""),
-    documentIncomeCertificate: StorageService.getMediaUrl(ext.documentIncomeCertificate || ""),
     documentAadhaarCard: StorageService.getMediaUrl(row.document_aadhaar_card || ""),
-    documentParentIdProof: StorageService.getMediaUrl(ext.documentParentIdProof || ""),
 
     // Raw S3 Keys
     s3_student_photo_key: ext.studentPhoto || "",
     s3_document_10th_key: row.document_10th_marksheet || "",
-    s3_document_11th_key: row.document_11th_marksheet || "",
     s3_document_12th_key: row.document_12th_marksheet || "",
-    s3_document_community_key: ext.documentCommunityCertificate || "",
-    s3_document_income_key: ext.documentIncomeCertificate || "",
     s3_document_aadhaar_key: row.document_aadhaar_card || "",
-    s3_document_parent_id_key: ext.documentParentIdProof || "",
 
     // Admin Rejection Reason / Remarks
     rejectionReason:

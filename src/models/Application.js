@@ -140,9 +140,6 @@ class ApplicationModel {
       "rejectionReason",
       "rejectionStage",
       "studentPhoto",
-      "documentCommunityCertificate",
-      "documentIncomeCertificate",
-      "documentParentIdProof",
     ];
 
     const hasVirtualField = virtualFields.some((f) => payload[f] !== undefined);

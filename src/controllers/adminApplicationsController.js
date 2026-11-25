@@ -119,12 +119,8 @@ async function getAllApplications(req, res) {
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(app.document_10th_marksheet || ""),
-        document11thMarksheet: StorageService.getMediaUrl(app.document_11th_marksheet || ""),
         document12thMarksheet: StorageService.getMediaUrl(app.document_12th_marksheet || ""),
-        documentCommunityCertificate: StorageService.getMediaUrl(ext.documentCommunityCertificate || ""),
-        documentIncomeCertificate: StorageService.getMediaUrl(ext.documentIncomeCertificate || ""),
         documentAadhaarCard: StorageService.getMediaUrl(app.document_aadhaar_card || ""),
-        documentParentIdProof: StorageService.getMediaUrl(ext.documentParentIdProof || ""),
       };
     });
 
@@ -249,12 +245,8 @@ async function getApplicationById(req, res) {
         // Resolved Media / Document URLs
         studentPhoto: StorageService.getMediaUrl(ext.studentPhoto || ""),
         document10thMarksheet: StorageService.getMediaUrl(application.document_10th_marksheet || ""),
-        document11thMarksheet: StorageService.getMediaUrl(application.document_11th_marksheet || ""),
         document12thMarksheet: StorageService.getMediaUrl(application.document_12th_marksheet || ""),
-        documentCommunityCertificate: StorageService.getMediaUrl(ext.documentCommunityCertificate || ""),
-        documentIncomeCertificate: StorageService.getMediaUrl(ext.documentIncomeCertificate || ""),
         documentAadhaarCard: StorageService.getMediaUrl(application.document_aadhaar_card || ""),
-        documentParentIdProof: StorageService.getMediaUrl(ext.documentParentIdProof || ""),
       },
     });
   } catch (err) {
@@ -944,13 +936,9 @@ async function deleteApplication(req, res) {
       }
       const s3KeysToDelete = [
         application.document_10th_marksheet,
-        application.document_11th_marksheet,
         application.document_12th_marksheet,
         application.document_aadhaar_card,
         ext.studentPhoto,
-        ext.documentCommunityCertificate,
-        ext.documentIncomeCertificate,
-        ext.documentParentIdProof,
       ].filter((k) => k && typeof k === "string" && !k.startsWith("data:"));
 
       if (s3KeysToDelete.length > 0) {
